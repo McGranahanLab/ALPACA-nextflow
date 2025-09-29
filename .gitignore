@@ -1,0 +1,6 @@
+.history
+nextflow/.nextflow*
+nextflow/work
+nextflow/reports
+alpaca-work
+logs
