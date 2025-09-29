@@ -34,7 +34,7 @@ workflow {
     def (missing_ch, validation_token_ch) = validateResults(expected_ch, actual_ch)
     missing_ch.subscribe { println "validation missing file: ${it}" }
     // run cleanup only if validation emits a done token
-    //cleanup(validation_token_ch)
+    cleanup(validation_token_ch)
     
 }
 
