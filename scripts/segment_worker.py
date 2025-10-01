@@ -5,6 +5,7 @@ This script is designed for Nextflow workers or long-lived local workers.
 """
 import os
 import sys
+import errno
 import time
 import subprocess
 import shutil
@@ -16,7 +17,7 @@ from datetime import datetime
 import shlex
 
 
-def claim_segment(pool_dir, in_progress_dir, done_dir):
+def claim_segment(pool_dir, in_progress_dir, done_dir, done_basenames=None):
     # Look for CSV files directly under pool_dir and atomically claim by
     # moving them into the worker-specific in_progress_dir.
     # If a basename already exists in done_dir, remove the pool entry and skip it.
@@ -30,56 +31,107 @@ def claim_segment(pool_dir, in_progress_dir, done_dir):
 
         # If this segment already exists in done_dir, remove it from pool and skip
         try:
-            already = False
-            for root, _, files in os.walk(done_dir):
-                if segment_file in files:
-                    already = True
-                    break
-            if already:
-                try:
-                    os.remove(os.path.join(pool_dir, segment_file))
-                    print(
-                        f"Skipping already-done segment {segment_file}; removed pool entry"
-                    )
-                except Exception:
-                    pass
-                continue
+            # consult cached done basenames if provided to avoid expensive walks
+            if done_basenames is not None:
+                if segment_file in done_basenames:
+                    try:
+                        os.remove(os.path.join(pool_dir, segment_file))
+                        print(f"Skipping already-done segment {segment_file}; removed pool entry (cache)")
+                    except Exception:
+                        pass
+                    continue
+            else:
+                already = False
+                for root, _, files in os.walk(done_dir):
+                    if segment_file in files:
+                        already = True
+                        break
+                if already:
+                    try:
+                        os.remove(os.path.join(pool_dir, segment_file))
+                        print(
+                            f"Skipping already-done segment {segment_file}; removed pool entry"
+                        )
+                    except Exception:
+                        pass
+                    continue
         except Exception:
             # if done_dir scanning fails, proceed to attempt claim
             pass
-
         src = os.path.join(pool_dir, segment_file)
         dst = os.path.join(in_progress_dir, segment_file)
-        try:
-            # record dev ids if possible for debugging (same-FS requirement)
+        # try a few times per entry to handle transient races
+        for attempt in range(3):
             try:
-                sdev = os.stat(src).st_dev
-            except Exception:
-                sdev = None
-            try:
-                ddev = os.stat(os.path.dirname(dst)).st_dev
-            except Exception:
-                ddev = None
-            # attempt atomic rename (fast path)
-            os.rename(src, dst)
-            return dst
-        except FileNotFoundError:
-            # someone else may have claimed it
-            continue
-        except OSError as e:
-            # return a detailed error for diagnostics but keep trying other entries
-            # log via a small diagnostic file appended to outputs if available
-            # embed errno and message for later inspection
-            err = getattr(e, 'errno', None)
-            msg = str(e)
-            # attach a small local debug file if possible
-            try:
-                dbg_path = os.path.join(in_progress_dir, f"claim_error.{segment_file}.log")
-                with open(dbg_path, 'w') as df:
-                    df.write(f"rename failed: src={src} dst={dst} errno={err} msg={msg} sdev={sdev} ddev={ddev}\n")
-            except Exception:
-                pass
-            continue
+                # record dev ids if possible for debugging (same-FS requirement)
+                try:
+                    sdev = os.stat(src).st_dev
+                except Exception:
+                    sdev = None
+                try:
+                    ddev = os.stat(os.path.dirname(dst)).st_dev
+                except Exception:
+                    ddev = None
+                # attempt atomic rename (fast path)
+                os.rename(src, dst)
+                return dst
+            except FileNotFoundError:
+                # someone else may have claimed it
+                break
+            except OSError as e:
+                err = getattr(e, 'errno', None)
+                msg = str(e)
+                # if cross-device link error, try copy+replace fallback
+                if err == errno.EXDEV:
+                    tmp = None
+                    try:
+                        # copy to a temp file in in_progress_dir then atomic replace
+                        tmp = os.path.join(in_progress_dir, f".{segment_file}.tmp.{os.getpid()}")
+                        shutil.copy2(src, tmp)
+                        try:
+                            with open(tmp, 'rb') as tf:
+                                try:
+                                    os.fsync(tf.fileno())
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                        os.replace(tmp, dst)
+                        # remove original src if still exists
+                        try:
+                            os.remove(src)
+                        except Exception:
+                            pass
+                        return dst
+                    except Exception as e2:
+                        # log fallback failure
+                        try:
+                            dbg_path = os.path.join(in_progress_dir, f"claim_error.{segment_file}.log")
+                            with open(dbg_path, 'a') as df:
+                                df.write(f"fallback failed: {e2} primary_errno={err} primary_msg={msg} sdev={sdev} ddev={ddev}\n")
+                        except Exception:
+                            pass
+                        # cleanup temp
+                        try:
+                            if tmp and os.path.exists(tmp):
+                                os.remove(tmp)
+                        except Exception:
+                            pass
+                        # retry a couple times
+                        time.sleep(0.1)
+                        continue
+                else:
+                    # non-EXDEV OSError: log diagnostics and retry a bit
+                    try:
+                        dbg_path = os.path.join(in_progress_dir, f"claim_error.{segment_file}.log")
+                        with open(dbg_path, 'a') as df:
+                            df.write(f"rename failed: src={src} dst={dst} errno={err} msg={msg} sdev={sdev} ddev={ddev}\n")
+                    except Exception:
+                        pass
+                    time.sleep(0.05)
+                    continue
+        # end attempts for this file -> move to next file
+        continue
     return None
 
 
@@ -301,7 +353,7 @@ def main():
         claimed_paths = []
         for i in range(args.segments_per_claim):
             claimed = claim_segment(
-                args.pool_dir, args.worker_in_progress, args.done_dir
+                args.pool_dir, args.worker_in_progress, args.done_dir, done_basenames
             )
             if claimed is None:
                 break
