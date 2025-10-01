@@ -10,6 +10,10 @@ import subprocess
 import shutil
 import argparse
 import traceback
+import json
+import socket
+from datetime import datetime
+import shlex
 
 
 def claim_segment(pool_dir, in_progress_dir, done_dir):
@@ -90,12 +94,10 @@ def run_alpaca_on_segment(claimed_paths, args):
         "--cpus",
         str(args.cpus),
     ]
-    if args.gurobi_logs:
-        cmd += ["--gurobi_logs", args.gurobi_logs]
-    if args.debug:
-        cmd += ["--debug"]
-    if args.output_all_solutions:
-        cmd += ["--output_all_solutions"]
+    # parse extra alpaca args (a single quoted string) into tokens
+    if getattr(args, "alpaca_args", None):
+        extra = shlex.split(args.alpaca_args)
+        cmd += extra
     print("Running:", " ".join(cmd))
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     return res
@@ -124,12 +126,16 @@ def main():
         type=int,
         help="How many segments to claim and pass to ALPACA in one invocation",
     )
-    p.add_argument("--debug", action="store_true")
-    p.add_argument("--output_all_solutions", action="store_true")
-    p.add_argument("--gurobi_logs", default="")
+    p.add_argument("--log-level", default=0, type=int)
     p.add_argument("--max-retries", default=2, type=int)
-    args = p.parse_args()
+    p.add_argument(
+        "--alpaca-args",
+        dest="alpaca_args",
+        default="",
+        help="Extra arguments (quoted) to append to the alpaca command, e.g. \"--debug --two_objectives 1\"",
+    )
 
+    args = p.parse_args()
     # create a per-worker in_progress directory to avoid cross-worker races
     if args.worker_id:
         worker_in_progress = os.path.join(
@@ -147,7 +153,96 @@ def main():
     os.makedirs(args.failed_dir, exist_ok=True)
     os.makedirs(args.outputs_dir, exist_ok=True)
     idle_cycles = 0
+    # Initiate a log to record all the file paths and operations perfomed by this worker
+    worker_log = {
+        "worker_id": args.worker_id or f"pid_{os.getpid()}",
+        "hostname": socket.gethostname(),
+        "start_time": datetime.now().isoformat() + "Z",
+        "pool_snapshots": [],  # list of {ts, files}
+        "claims": [],  # list of {ts, basename, claimed_path}
+        "alapaca_runs": [],  # list of {ts, tumour, input_files, returncode, success, stdout_snip, stderr_snip}
+        "moves": [],  # list of {ts, basename, src, dest, result}
+    }
+    # Record the provided path params
+    worker_log["params"] = {
+        "pool_dir": args.pool_dir,
+        "in_progress_dir": args.in_progress_dir,
+        "outputs_dir": args.outputs_dir,
+        "done_dir": args.done_dir,
+        "failed_dir": args.failed_dir,
+        "cohort_dir": args.cohort_dir,
+    }
+
+    # Do quick existence/listing checks immediately and flush the log so it's
+    # available even if the worker finds no work.
+    path_checks = {}
+    for name, path_val in worker_log["params"].items():
+        try:
+            exists = os.path.exists(path_val)
+            entries = []
+            if exists and os.path.isdir(path_val):
+                try:
+                    entries = os.listdir(path_val)
+                except Exception:
+                    entries = []
+            path_checks[name] = {"exists": exists, "entry_count": len(entries)}
+        except Exception as e:
+            path_checks[name] = {"error": str(e)}
+    worker_log["initial_path_checks"] = path_checks
+
+    # flush initial worker log immediately
+    try:
+        outname = f"worker_{worker_log['worker_id']}.done.log"
+        outpath = os.path.join(args.outputs_dir, outname)
+        tmp = outpath + f".tmp.{os.getpid()}.{int(time.time()*1000)}"
+        with open(tmp, "w") as fh:
+            json.dump(worker_log, fh, indent=2)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except Exception:
+                pass
+        os.replace(tmp, outpath)
+    except Exception:
+        traceback.print_exc()
+    # print an explicit startup message about where this worker will look
+    try:
+        pool_chk = worker_log["initial_path_checks"].get("pool_dir", {})
+        msg = (
+            f"Worker starting: looking at pool_dir={args.pool_dir!r} exists={pool_chk.get('exists')}"
+            f" entry_count={pool_chk.get('entry_count')}")
+        print(msg)
+        worker_log.setdefault("messages", []).append({
+            "ts": datetime.now().isoformat() + "Z",
+            "msg": msg,
+        })
+    except Exception:
+        pass
     while True:
+        try:
+            exists = os.path.exists(args.pool_dir)
+            try:
+                entries = sorted(os.listdir(args.pool_dir)) if exists else []
+            except Exception:
+                entries = []
+            sample = [f for f in entries if f.endswith('.csv')][:20]
+            msg = (
+                f"Inspecting pool_dir={args.pool_dir!r} exists={exists} total_entries={len(entries)} "
+                f"csv_sample_count={len(sample)}"
+            )
+            print(msg)
+            worker_log.setdefault("messages", []).append({
+                "ts": datetime.now().isoformat() + "Z",
+                "msg": msg,
+                "csv_sample": sample,
+            })
+            pool_files = sorted([f for f in entries if f.endswith(".csv")])
+        except Exception:
+            pool_files = []
+        worker_log["pool_snapshots"].append(
+            {"ts": datetime.now().isoformat() + "Z", "files": pool_files}
+        )
+
         # Claim up to N segments into the worker-specific in_progress area
         claimed_paths = []
         for i in range(args.segments_per_claim):
@@ -156,7 +251,31 @@ def main():
             )
             if claimed is None:
                 break
+            # record claim
+            worker_log["claims"].append(
+                {
+                    "ts": datetime.now().isoformat() + "Z",
+                    "basename": os.path.basename(claimed),
+                    "path": claimed,
+                }
+            )
             claimed_paths.append(claimed)
+
+        # Always flush the worker log after attempting claims so it's available
+        try:
+            outname = f"worker_{worker_log['worker_id']}.done.log"
+            outpath = os.path.join(args.outputs_dir, outname)
+            tmp = outpath + f".tmp.{os.getpid()}.{int(time.time()*1000)}"
+            with open(tmp, "w") as fh:
+                json.dump(worker_log, fh, indent=2)
+                fh.flush()
+                try:
+                    os.fsync(fh.fileno())
+                except Exception:
+                    pass
+            os.replace(tmp, outpath)
+        except Exception:
+            traceback.print_exc()
 
         if not claimed_paths:
             idle_cycles += 1
@@ -184,6 +303,17 @@ def main():
             while retries <= args.max_retries and not success:
                 try:
                     res = run_alpaca_on_segment(paths, args)
+                    # record ALPACA invocation result
+                    worker_log["alapaca_runs"].append(
+                        {
+                            "ts": datetime.now().isoformat() + "Z",
+                            "tumour": tumour,
+                            "input_files": [os.path.basename(p) for p in paths],
+                            "returncode": res.returncode,
+                            "stdout_snip": (res.stdout[:2000] if res.stdout else ""),
+                            "stderr_snip": (res.stderr[:2000] if res.stderr else ""),
+                        }
+                    )
                     print(res.stdout)
                     if res.returncode == 0:
                         success = True
@@ -214,13 +344,57 @@ def main():
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             try:
                 shutil.move(p, dest)
+                worker_log["moves"].append(
+                    {
+                        "ts": datetime.now().isoformat() + "Z",
+                        "basename": os.path.basename(p),
+                        "src": p,
+                        "dest": dest,
+                        "result": "moved",
+                    }
+                )
             except FileNotFoundError:
                 print(
                     f"Warning: file not found when moving '{p}' -> '{dest}'; maybe processed by another worker",
                     file=sys.stderr,
                 )
+                worker_log["moves"].append(
+                    {
+                        "ts": datetime.now().isoformat() + "Z",
+                        "basename": os.path.basename(p),
+                        "src": p,
+                        "dest": dest,
+                        "result": "not_found",
+                    }
+                )
             except OSError as e:
                 print(f"Error moving '{p}' -> '{dest}': {e}", file=sys.stderr)
+                worker_log["moves"].append(
+                    {
+                        "ts": datetime.now().isoformat() + "Z",
+                        "basename": os.path.basename(p),
+                        "src": p,
+                        "dest": dest,
+                        "result": f"error: {e}",
+                    }
+                )
+
+        # Flush worker log to outputs dir after each batch so it's available
+        try:
+            outname = f"worker_{worker_log['worker_id']}.done.log"
+            outpath = os.path.join(args.outputs_dir, outname)
+            tmp = outpath + f".tmp.{os.getpid()}.{int(time.time()*1000)}"
+            with open(tmp, "w") as fh:
+                json.dump(worker_log, fh, indent=2)
+                fh.flush()
+                try:
+                    os.fsync(fh.fileno())
+                except Exception:
+                    pass
+            os.replace(tmp, outpath)
+        except Exception:
+            # best-effort, don't fail the worker for logging problems
+            traceback.print_exc()
 
 
 if __name__ == "__main__":

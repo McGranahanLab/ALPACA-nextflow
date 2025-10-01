@@ -5,48 +5,35 @@
 params.workers = params.workers ?: 4
 params.cpus = params.cpus ?: 1
 params.alpaca_args = params.alpaca_args ?: ''
-// allow CONDA_ENV from environment or params
-params.conda_env = params.conda_env ?: System.getenv('CONDA_ENV') ?: null
-// allow configuring how many segments a worker should claim per ALPACA call
+params.worker_logs = params.worker_logs ?: 0
 params.segments_per_claim = params.segments_per_claim ?: System.getenv('SEGMENTS_PER_CLAIM')?.toInteger() ?: 1
 workflow {
     // Prepare the lightweight symlink pool once before starting workers - workers will claimed unsolved segments from here
     def pool = preparePool()
-
-    // pool.out emits the prepared segments list file; also watch the ready token and expand to worker ids
-    nextflow.Channel.fromPath("${params.outputs_dir}/pool_ready.txt")
-        .flatMap { (1..params.workers).toList() }
-        .set { workers_ch }
-
-    // run worker tasks in parallel and capture their output channel (they emit a local done file)
-    def worker_done_ch = workers_ch | workerTask
-
-    // collect worker completion tokens emitted by workerTask
+    def worker_input = pool.flatMap { segfile ->
+    (1..params.workers).collect { wid -> [wid, segfile] }}
+    // run workers in parallel
+    def worker_done_ch = workerTask(worker_input)
     def all_workers_done = worker_done_ch.collect()
-
     // run merge after all workers finished
-    
     def merge = mergeSegments(all_workers_done)
-
     // validate results: collect the prepared segments list (pool.out) and merged segments list (merge.out) and compare
     def expected_ch = pool.collect()
     def actual_ch = merge.collect()
     def (missing_ch, validation_token_ch) = validateResults(expected_ch, actual_ch)
     missing_ch.subscribe { println "validation missing file: ${it}" }
     // run cleanup only if validation emits a done token
-    //cleanup(validation_token_ch)
-    
+    cleanup(validation_token_ch)
 }
 
 
 process workerTask {
-    // Use runtime-provided conda env if set
     conda params.conda_env
     label 'worker_high'
     tag "$worker_id"
     cpus params.cpus
     input:
-    val(worker_id)
+    tuple val(worker_id), file(segments_list)
 
     output:
     file 'worker_*.done'
@@ -63,9 +50,11 @@ process workerTask {
             --outputs-dir ${params.outputs_dir} \
             --cpus ${task.cpus} \
             --segments-per-claim ${params.segments_per_claim} \
-            ${params.alpaca_args}
+            --log-level ${params.worker_logs} \
+                --alpaca-args '${params.alpaca_args}'
     # emit a simple local done token file so the workflow knows this worker finished
     echo "DONE ${worker_id}" > worker_${worker_id}.done
+    hostname >> worker_${worker_id}.done
     # copy the token into the shared outputs dir for external visibility
     mkdir -p ${params.outputs_dir}
     cp worker_${worker_id}.done ${params.outputs_dir}/worker_${worker_id}.done || true
@@ -117,7 +106,7 @@ process preparePool {
 
         # create a canonical list of segments the workers should process
         ls -1 ${params.pool_dir} | sort > segments_to_process.txt
-        # also write a human-visible token for backwards compatibility
+        echo ready > pool_ready.txt
         echo ready > ${params.outputs_dir}/pool_ready.txt
     """
 

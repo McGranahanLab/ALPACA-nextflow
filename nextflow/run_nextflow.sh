@@ -3,13 +3,16 @@
 # Usage: ./nextflow/run_nextflow.sh [nextflow args]
 
 set -euo pipefail
+
+RUN_CONFIG=$1
+
 THIS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
 REPO_ROOT="$(cd "$THIS_SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P)"
 cd $REPO_ROOT || exit 1
 # load user config if present
-if [ -f "$REPO_ROOT/nextflow/pipeline.env" ]; then
+if [ -f "$REPO_ROOT/nextflow/$RUN_CONFIG" ]; then
 	# shellcheck disable=SC1090
-	source "$REPO_ROOT/nextflow/pipeline.env"
+	source "$REPO_ROOT/nextflow/$RUN_CONFIG"
 fi
 
 mkdir -p "$ALPACA_WORK" "$POOL_DIR" "$IN_PROGRESS_DIR" "$DONE_DIR" "$FAILED_DIR" "$OUTPUTS_DIR" "$NFX_REPORTS"
@@ -25,7 +28,8 @@ COHORT_DIR="$(realpath "${COHORT_DIR:-$REPO_ROOT/dev/multi-tumour/cohort}")"
 ALPACA_WORK="$(realpath "${ALPACA_WORK:-$REPO_ROOT/dev/alpaca-work}")"
 NFX_REPORTS="$(realpath "${NFX_REPORTS:-$REPO_ROOT/nextflow/reports}")"
 
-# build nextflow args from env settings
+# build args from env settings
+timestamp=$(date +%Y%m%d_%H%M%S)
 NXF_ARGS=( run main.nf -profile "${ENV_PROFILE:-local}" )
 NXF_ARGS+=( --alpaca_work_dir "${ALPACA_WORK}" )
 NXF_ARGS+=( --pool_dir "${POOL_DIR}" )
@@ -40,18 +44,20 @@ NXF_ARGS+=( --cpus "${CPUS:-1}" )
 NXF_ARGS+=( --debug "${DEBUG:-0}" )
 NXF_ARGS+=( --conda_env "${CONDA_ENV:-}" )
 NXF_ARGS+=( --segments_per_claim "${SEGMENTS_PER_CLAIM:-1}" )
-NXF_ARGS+=( -with-report "${NFX_REPORTS}/report.html" )
+NXF_ARGS+=( --worker_logs "${WORKER_LOGS:-0}" )
+NXF_ARGS+=( -with-report "${NFX_REPORTS}/report_${timestamp}.html" )
 if [ -n "${ALPACA_ARGS:-}" ]; then
 	NXF_ARGS+=( --alpaca_args "${ALPACA_ARGS}" )
 fi
 
-
-# append any extra args passed on the command line
 for a in "$@"; do
 	NXF_ARGS+=( "$a" )
 done
 
 echo executing nextflow "${NXF_ARGS[@]}"
+# persist configuration used for this run
+mkdir -p "$COHORT_DIR/output/reports"
+cp "$REPO_ROOT/nextflow/$RUN_CONFIG" "$COHORT_DIR/output/reports/used_config_${timestamp}.env"
 
 pushd "$REPO_ROOT/nextflow" >/dev/null
 nextflow "${NXF_ARGS[@]}"
