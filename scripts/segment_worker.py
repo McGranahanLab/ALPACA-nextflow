@@ -20,7 +20,11 @@ def claim_segment(pool_dir, in_progress_dir, done_dir):
     # Look for CSV files directly under pool_dir and atomically claim by
     # moving them into the worker-specific in_progress_dir.
     # If a basename already exists in done_dir, remove the pool entry and skip it.
-    for segment_file in os.listdir(pool_dir):
+    try:
+        pool_entries = os.listdir(pool_dir)
+    except Exception:
+        pool_entries = []
+    for segment_file in pool_entries:
         if not segment_file.endswith(".csv"):
             continue
 
@@ -47,13 +51,34 @@ def claim_segment(pool_dir, in_progress_dir, done_dir):
         src = os.path.join(pool_dir, segment_file)
         dst = os.path.join(in_progress_dir, segment_file)
         try:
+            # record dev ids if possible for debugging (same-FS requirement)
+            try:
+                sdev = os.stat(src).st_dev
+            except Exception:
+                sdev = None
+            try:
+                ddev = os.stat(os.path.dirname(dst)).st_dev
+            except Exception:
+                ddev = None
+            # attempt atomic rename (fast path)
             os.rename(src, dst)
             return dst
         except FileNotFoundError:
             # someone else may have claimed it
             continue
-        except OSError:
-            # skip problematic entries
+        except OSError as e:
+            # return a detailed error for diagnostics but keep trying other entries
+            # log via a small diagnostic file appended to outputs if available
+            # embed errno and message for later inspection
+            err = getattr(e, 'errno', None)
+            msg = str(e)
+            # attach a small local debug file if possible
+            try:
+                dbg_path = os.path.join(in_progress_dir, f"claim_error.{segment_file}.log")
+                with open(dbg_path, 'w') as df:
+                    df.write(f"rename failed: src={src} dst={dst} errno={err} msg={msg} sdev={sdev} ddev={ddev}\n")
+            except Exception:
+                pass
             continue
     return None
 
@@ -153,6 +178,10 @@ def main():
     os.makedirs(args.failed_dir, exist_ok=True)
     os.makedirs(args.outputs_dir, exist_ok=True)
     idle_cycles = 0
+    # cache of done basenames to avoid rescanning the done_dir on each claim
+    done_basenames = set()
+    done_cache_last = 0
+    done_cache_ttl = 30.0  # seconds
     # Initiate a log to record all the file paths and operations perfomed by this worker
     worker_log = {
         "worker_id": args.worker_id or f"pid_{os.getpid()}",
@@ -172,6 +201,9 @@ def main():
         "failed_dir": args.failed_dir,
         "cohort_dir": args.cohort_dir,
     }
+
+    # diagnostic heartbeat file (updated each loop) so external tooling can see worker is alive
+    heartbeat_path = os.path.join(args.outputs_dir, f"worker_{worker_log['worker_id']}.heartbeat")
 
     # Do quick existence/listing checks immediately and flush the log so it's
     # available even if the worker finds no work.
@@ -219,6 +251,28 @@ def main():
     except Exception:
         pass
     while True:
+        # update heartbeat
+        try:
+            with open(heartbeat_path, 'w') as hf:
+                hf.write(datetime.now().isoformat() + 'Z')
+        except Exception:
+            pass
+
+        # refresh done_dir cache periodically
+        try:
+            nowt = time.time()
+            if nowt - done_cache_last > done_cache_ttl:
+                new_done = set()
+                try:
+                    for root, _, files in os.walk(args.done_dir):
+                        for f in files:
+                            new_done.add(f)
+                except Exception:
+                    new_done = done_basenames
+                done_basenames = new_done
+                done_cache_last = nowt
+        except Exception:
+            pass
         try:
             exists = os.path.exists(args.pool_dir)
             try:
@@ -279,8 +333,22 @@ def main():
 
         if not claimed_paths:
             idle_cycles += 1
-            if idle_cycles > 5:
-                print("No work found, exiting worker.")
+            # if idling for a long time produce a diagnostic dump and exit to free node
+            if idle_cycles > 300:
+                # write diagnostics
+                try:
+                    diag = {
+                        'ts': datetime.now().isoformat() + 'Z',
+                        'idle_cycles': idle_cycles,
+                        'pool_snapshot': worker_log.get('pool_snapshots', [])[-5:],
+                        'done_count': len(done_basenames),
+                    }
+                    diag_path = os.path.join(args.outputs_dir, f"worker_{worker_log['worker_id']}.stuck.json")
+                    with open(diag_path, 'w') as df:
+                        json.dump(diag, df, indent=2)
+                except Exception:
+                    pass
+                print("No work found for extended period, exiting worker and writing diagnostics.")
                 break
             time.sleep(args.poll_interval)
             continue
