@@ -36,7 +36,9 @@ def claim_segment(pool_dir, in_progress_dir, done_dir, done_basenames=None):
                 if segment_file in done_basenames:
                     try:
                         os.remove(os.path.join(pool_dir, segment_file))
-                        print(f"Skipping already-done segment {segment_file}; removed pool entry (cache)")
+                        print(
+                            f"Skipping already-done segment {segment_file}; removed pool entry (cache)"
+                        )
                     except Exception:
                         pass
                     continue
@@ -79,17 +81,19 @@ def claim_segment(pool_dir, in_progress_dir, done_dir, done_basenames=None):
                 # someone else may have claimed it
                 break
             except OSError as e:
-                err = getattr(e, 'errno', None)
+                err = getattr(e, "errno", None)
                 msg = str(e)
                 # if cross-device link error, try copy+replace fallback
                 if err == errno.EXDEV:
                     tmp = None
                     try:
                         # copy to a temp file in in_progress_dir then atomic replace
-                        tmp = os.path.join(in_progress_dir, f".{segment_file}.tmp.{os.getpid()}")
+                        tmp = os.path.join(
+                            in_progress_dir, f".{segment_file}.tmp.{os.getpid()}"
+                        )
                         shutil.copy2(src, tmp)
                         try:
-                            with open(tmp, 'rb') as tf:
+                            with open(tmp, "rb") as tf:
                                 try:
                                     os.fsync(tf.fileno())
                                 except Exception:
@@ -106,9 +110,13 @@ def claim_segment(pool_dir, in_progress_dir, done_dir, done_basenames=None):
                     except Exception as e2:
                         # log fallback failure
                         try:
-                            dbg_path = os.path.join(in_progress_dir, f"claim_error.{segment_file}.log")
-                            with open(dbg_path, 'a') as df:
-                                df.write(f"fallback failed: {e2} primary_errno={err} primary_msg={msg} sdev={sdev} ddev={ddev}\n")
+                            dbg_path = os.path.join(
+                                in_progress_dir, f"claim_error.{segment_file}.log"
+                            )
+                            with open(dbg_path, "a") as df:
+                                df.write(
+                                    f"fallback failed: {e2} primary_errno={err} primary_msg={msg} sdev={sdev} ddev={ddev}\n"
+                                )
                         except Exception:
                             pass
                         # cleanup temp
@@ -123,9 +131,13 @@ def claim_segment(pool_dir, in_progress_dir, done_dir, done_basenames=None):
                 else:
                     # non-EXDEV OSError: log diagnostics and retry a bit
                     try:
-                        dbg_path = os.path.join(in_progress_dir, f"claim_error.{segment_file}.log")
-                        with open(dbg_path, 'a') as df:
-                            df.write(f"rename failed: src={src} dst={dst} errno={err} msg={msg} sdev={sdev} ddev={ddev}\n")
+                        dbg_path = os.path.join(
+                            in_progress_dir, f"claim_error.{segment_file}.log"
+                        )
+                        with open(dbg_path, "a") as df:
+                            df.write(
+                                f"rename failed: src={src} dst={dst} errno={err} msg={msg} sdev={sdev} ddev={ddev}\n"
+                            )
                     except Exception:
                         pass
                     time.sleep(0.05)
@@ -198,6 +210,18 @@ def main():
     p.add_argument("--poll-interval", default=2, type=int)
     p.add_argument("--backoff", default=2, type=float)
     p.add_argument(
+        "--queue-poll-interval",
+        default=None,
+        type=float,
+        help="How often (s) the worker polls its queue subdir. Falls back to --poll-interval if not set.",
+    )
+    p.add_argument(
+        "--max-idle-seconds",
+        default=600,
+        type=int,
+        help="If the worker sees no new work for this many seconds it will exit and emit its done token.",
+    )
+    p.add_argument(
         "--segments-per-claim",
         default=1,
         type=int,
@@ -209,7 +233,7 @@ def main():
         "--alpaca-args",
         dest="alpaca_args",
         default="",
-        help="Extra arguments (quoted) to append to the alpaca command, e.g. \"--debug --two_objectives 1\"",
+        help='Extra arguments (quoted) to append to the alpaca command, e.g. "--debug --two_objectives 1"',
     )
 
     args = p.parse_args()
@@ -229,7 +253,17 @@ def main():
     os.makedirs(args.done_dir, exist_ok=True)
     os.makedirs(args.failed_dir, exist_ok=True)
     os.makedirs(args.outputs_dir, exist_ok=True)
-    idle_cycles = 0
+    # ensure subdirs for segment outputs and worker logs
+    segment_out_dir = os.path.join(args.outputs_dir, "segment_outputs")
+    worker_logs_dir = os.path.join(args.outputs_dir, "worker_logs")
+    os.makedirs(segment_out_dir, exist_ok=True)
+    os.makedirs(worker_logs_dir, exist_ok=True)
+    # ensure per-worker queue and in_progress subdirs
+    worker_queue_dir = os.path.join(worker_in_progress, "queue")
+    worker_active_dir = os.path.join(worker_in_progress, "in_progress")
+    os.makedirs(worker_queue_dir, exist_ok=True)
+    os.makedirs(worker_active_dir, exist_ok=True)
+    # idle tracking is now handled via last_work_ts in worker_log
     # cache of done basenames to avoid rescanning the done_dir on each claim
     done_basenames = set()
     done_cache_last = 0
@@ -255,7 +289,9 @@ def main():
     }
 
     # diagnostic heartbeat file (updated each loop) so external tooling can see worker is alive
-    heartbeat_path = os.path.join(args.outputs_dir, f"worker_{worker_log['worker_id']}.heartbeat")
+    heartbeat_path = os.path.join(
+        worker_logs_dir, f"worker_{worker_log['worker_id']}.heartbeat"
+    )
 
     # Do quick existence/listing checks immediately and flush the log so it's
     # available even if the worker finds no work.
@@ -277,7 +313,7 @@ def main():
     # flush initial worker log immediately
     try:
         outname = f"worker_{worker_log['worker_id']}.done.log"
-        outpath = os.path.join(args.outputs_dir, outname)
+        outpath = os.path.join(worker_logs_dir, outname)
         tmp = outpath + f".tmp.{os.getpid()}.{int(time.time()*1000)}"
         with open(tmp, "w") as fh:
             json.dump(worker_log, fh, indent=2)
@@ -294,19 +330,22 @@ def main():
         pool_chk = worker_log["initial_path_checks"].get("pool_dir", {})
         msg = (
             f"Worker starting: looking at pool_dir={args.pool_dir!r} exists={pool_chk.get('exists')}"
-            f" entry_count={pool_chk.get('entry_count')}")
+            f" entry_count={pool_chk.get('entry_count')}"
+        )
         print(msg)
-        worker_log.setdefault("messages", []).append({
-            "ts": datetime.now().isoformat() + "Z",
-            "msg": msg,
-        })
+        worker_log.setdefault("messages", []).append(
+            {
+                "ts": datetime.now().isoformat() + "Z",
+                "msg": msg,
+            }
+        )
     except Exception:
         pass
     while True:
         # update heartbeat
         try:
-            with open(heartbeat_path, 'w') as hf:
-                hf.write(datetime.now().isoformat() + 'Z')
+            with open(heartbeat_path, "w") as hf:
+                hf.write(datetime.now().isoformat() + "Z")
         except Exception:
             pass
 
@@ -325,52 +364,89 @@ def main():
                 done_cache_last = nowt
         except Exception:
             pass
+        # Inspect per-worker queue instead of global pool
         try:
-            exists = os.path.exists(args.pool_dir)
-            try:
-                entries = sorted(os.listdir(args.pool_dir)) if exists else []
-            except Exception:
-                entries = []
-            sample = [f for f in entries if f.endswith('.csv')][:20]
-            msg = (
-                f"Inspecting pool_dir={args.pool_dir!r} exists={exists} total_entries={len(entries)} "
-                f"csv_sample_count={len(sample)}"
-            )
-            print(msg)
-            worker_log.setdefault("messages", []).append({
-                "ts": datetime.now().isoformat() + "Z",
-                "msg": msg,
-                "csv_sample": sample,
-            })
-            pool_files = sorted([f for f in entries if f.endswith(".csv")])
+            q_entries = sorted(os.listdir(worker_queue_dir))
         except Exception:
-            pool_files = []
-        worker_log["pool_snapshots"].append(
-            {"ts": datetime.now().isoformat() + "Z", "files": pool_files}
+            q_entries = []
+        q_sample = [f for f in q_entries if f.endswith(".csv")][:20]
+        msg = f"Inspecting queue_dir={worker_queue_dir!r} total_entries={len(q_entries)} csv_sample_count={len(q_sample)}"
+        print(msg)
+        worker_log.setdefault("messages", []).append(
+            {"ts": datetime.now().isoformat() + "Z", "msg": msg, "csv_sample": q_sample}
+        )
+        worker_log.setdefault("queue_snapshots", []).append(
+            {"ts": datetime.now().isoformat() + "Z", "files": q_entries}
         )
 
-        # Claim up to N segments into the worker-specific in_progress area
+        # Move up to N segments from queue -> in_progress for local processing
         claimed_paths = []
-        for i in range(args.segments_per_claim):
-            claimed = claim_segment(
-                args.pool_dir, args.worker_in_progress, args.done_dir, done_basenames
-            )
-            if claimed is None:
-                break
-            # record claim
-            worker_log["claims"].append(
-                {
-                    "ts": datetime.now().isoformat() + "Z",
-                    "basename": os.path.basename(claimed),
-                    "path": claimed,
-                }
-            )
-            claimed_paths.append(claimed)
+
+        # helper to move a queue file into the in_progress dir (atomic rename preferred)
+        def move_queue_file(basename):
+            src = os.path.join(worker_queue_dir, basename)
+            dst = os.path.join(worker_active_dir, basename)
+            for attempt in range(3):
+                try:
+                    os.rename(src, dst)
+                    return dst
+                except FileNotFoundError:
+                    return None
+                except OSError as e:
+                    err = getattr(e, "errno", None)
+                    if err == errno.EXDEV:
+                        tmp = None
+                        try:
+                            tmp = dst + f".tmp.{os.getpid()}"
+                            shutil.copy2(src, tmp)
+                            try:
+                                with open(tmp, "rb") as tf:
+                                    try:
+                                        os.fsync(tf.fileno())
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                            os.replace(tmp, dst)
+                            try:
+                                os.remove(src)
+                            except Exception:
+                                pass
+                            return dst
+                        except Exception:
+                            try:
+                                if tmp and os.path.exists(tmp):
+                                    os.remove(tmp)
+                            except Exception:
+                                pass
+                            time.sleep(0.05)
+                            continue
+                    else:
+                        time.sleep(0.02)
+                        continue
+            return None
+
+        # try to claim up to segments_per_claim files
+        to_claim = [f for f in q_entries if f.endswith(".csv")][
+            : args.segments_per_claim
+        ]
+        for bn in to_claim:
+            moved = move_queue_file(bn)
+            if moved:
+                worker_log["claims"].append(
+                    {
+                        "ts": datetime.now().isoformat() + "Z",
+                        "basename": os.path.basename(moved),
+                        "path": moved,
+                        "from_queue": True,
+                    }
+                )
+                claimed_paths.append(moved)
 
         # Always flush the worker log after attempting claims so it's available
         try:
             outname = f"worker_{worker_log['worker_id']}.done.log"
-            outpath = os.path.join(args.outputs_dir, outname)
+            outpath = os.path.join(worker_logs_dir, outname)
             tmp = outpath + f".tmp.{os.getpid()}.{int(time.time()*1000)}"
             with open(tmp, "w") as fh:
                 json.dump(worker_log, fh, indent=2)
@@ -382,30 +458,41 @@ def main():
             os.replace(tmp, outpath)
         except Exception:
             traceback.print_exc()
-
+        print("Claimed paths:", claimed_paths)
         if not claimed_paths:
-            idle_cycles += 1
-            # if idling for a long time produce a diagnostic dump and exit to free node
-            if idle_cycles > 300:
-                # write diagnostics
+            # no files moved from queue this iteration
+            # terminate if we've been idle for too long
+            # last_idle not used; compute idle_seconds from last_work_ts below
+            # simpler: track last work timestamp
+            if "last_work_ts" not in worker_log:
+                worker_log["last_work_ts"] = time.time()
+            if len(worker_log.get("claims", [])) > 0:
+                worker_log["last_work_ts"] = time.time()
+            idle_seconds = time.time() - worker_log.get("last_work_ts", time.time())
+            if idle_seconds > args.max_idle_seconds:
                 try:
                     diag = {
-                        'ts': datetime.now().isoformat() + 'Z',
-                        'idle_cycles': idle_cycles,
-                        'pool_snapshot': worker_log.get('pool_snapshots', [])[-5:],
-                        'done_count': len(done_basenames),
+                        "ts": datetime.now().isoformat() + "Z",
+                        "idle_seconds": idle_seconds,
+                        "queue_snapshot": worker_log.get("queue_snapshots", [])[-5:],
+                        "done_count": len(done_basenames),
                     }
-                    diag_path = os.path.join(args.outputs_dir, f"worker_{worker_log['worker_id']}.stuck.json")
-                    with open(diag_path, 'w') as df:
+                    diag_path = os.path.join(
+                        worker_logs_dir, f"worker_{worker_log['worker_id']}.stuck.json"
+                    )
+                    with open(diag_path, "w") as df:
                         json.dump(diag, df, indent=2)
                 except Exception:
                     pass
-                print("No work found for extended period, exiting worker and writing diagnostics.")
+                print(
+                    "No work found for extended period, exiting worker and writing diagnostics."
+                )
                 break
-            time.sleep(args.poll_interval)
+            time.sleep(args.queue_poll_interval or args.poll_interval)
             continue
 
-        idle_cycles = 0
+        # reset idle marker since we got work
+        worker_log["last_work_ts"] = time.time()
         retries = 0
         success = False
         # Group claimed files by tumour so we can invoke ALPACA once per tumour

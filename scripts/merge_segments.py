@@ -6,16 +6,21 @@ import pandas as pd
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--segments-dir", required=True)
+    p.add_argument(
+        "--segments-dir",
+        required=True,
+        help="Directory with per-segment CSVs (e.g. outputs/segment_outputs)",
+    )
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
     seg_dfs = []
     files = os.listdir(args.segments_dir)
     for f in files:
+        # Only consider 'optimal' CSVs produced by ALPACA
         if not f.endswith(".csv"):
             continue
-        if "combined" in f:
+        if not os.path.basename(f).startswith("optimal"):
             continue
         df = pd.read_csv(os.path.join(args.segments_dir, f))
         seg_dfs.append(df)
