@@ -130,7 +130,9 @@ process mergeSegments {
     mkdir -p ${params.outputs_dir}/merged
     python ${params.script_dir}/merge_segments.py \
             --segments-dir ${params.outputs_dir} \
-            --out ${params.outputs_dir}/merged/all_tumours_combined.csv
+            --out ${params.outputs_dir}/merged/all_tumours_combined.csv \
+            --input-dir ${params.cohort_dir}/input
+
 
     # emit a list of merged segment files (based on outputs_dir contents), portable
     ls -1 ${params.outputs_dir}/*.csv 2>/dev/null | xargs -n1 basename | sort > merged_segments.txt || true
