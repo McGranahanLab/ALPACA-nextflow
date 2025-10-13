@@ -161,7 +161,9 @@ def run_alpaca_on_segment(claimed_paths, args):
     first = basenames[0]
     tumour = first.replace("ALPACA_input_table_", "").split("_", 1)[0]
     tumour_cohort_dir = os.path.join(args.cohort_dir, "input", tumour)
-
+    tumour_in_progress = os.path.join(args.worker_in_progress, 'in_progress')
+    segment_solution_output_dir = os.path.join(args.outputs_dir, "segment_outputs")
+    
     cmd = [
         sys.executable,
         "-m",
@@ -172,14 +174,14 @@ def run_alpaca_on_segment(claimed_paths, args):
         "--input_tumour_directory",
         tumour_cohort_dir,
         "--input_data_directory",
-        args.worker_in_progress,
+        tumour_in_progress,
         "--input_files",
     ]
     # append each input file as a separate argument
     cmd += basenames
     cmd += [
         "--output_directory",
-        args.outputs_dir,
+        segment_solution_output_dir,
         "--cpus",
         str(args.cpus),
     ]
@@ -209,12 +211,6 @@ def main():
     p.add_argument("--cpus", default=1, type=int)
     p.add_argument("--poll-interval", default=2, type=int)
     p.add_argument("--backoff", default=2, type=float)
-    p.add_argument(
-        "--queue-poll-interval",
-        default=None,
-        type=float,
-        help="How often (s) the worker polls its queue subdir. Falls back to --poll-interval if not set.",
-    )
     p.add_argument(
         "--max-idle-seconds",
         default=600,
@@ -258,6 +254,9 @@ def main():
     worker_logs_dir = os.path.join(args.outputs_dir, "worker_logs")
     os.makedirs(segment_out_dir, exist_ok=True)
     os.makedirs(worker_logs_dir, exist_ok=True)
+    # create reports directory:
+    reports_dir = os.path.join(args.outputs_dir, "reports")
+    os.makedirs(reports_dir, exist_ok=True)
     # ensure per-worker queue and in_progress subdirs
     worker_queue_dir = os.path.join(worker_in_progress, "queue")
     worker_active_dir = os.path.join(worker_in_progress, "in_progress")
@@ -460,16 +459,15 @@ def main():
             traceback.print_exc()
         print("Claimed paths:", claimed_paths)
         if not claimed_paths:
-            # no files moved from queue this iteration
-            # terminate if we've been idle for too long
-            # last_idle not used; compute idle_seconds from last_work_ts below
-            # simpler: track last work timestamp
             if "last_work_ts" not in worker_log:
                 worker_log["last_work_ts"] = time.time()
             if len(worker_log.get("claims", [])) > 0:
                 worker_log["last_work_ts"] = time.time()
             idle_seconds = time.time() - worker_log.get("last_work_ts", time.time())
-            if idle_seconds > args.max_idle_seconds:
+            # exit if idle time is too long or if nothing else is left to claim and worker confirms that dispatcher exited
+            dispatcher_done_path = os.path.exists(os.path.join(args.outputs_dir, "dispatcher.done"))
+            timeout_reached = idle_seconds > args.max_idle_seconds
+            if timeout_reached or dispatcher_done_path:
                 try:
                     diag = {
                         "ts": datetime.now().isoformat() + "Z",
@@ -484,11 +482,14 @@ def main():
                         json.dump(diag, df, indent=2)
                 except Exception:
                     pass
-                print(
-                    "No work found for extended period, exiting worker and writing diagnostics."
-                )
+                if timeout_reached:
+                    exit_msg = "No work found for extended period, exiting worker and writing diagnostics."
+                elif dispatcher_done_path:
+                    exit_msg = "Dispatcher done file detected and no work found, exiting worker."
+                print(exit_msg)
+                worker_log.setdefault("messages", []).append(exit_msg)
                 break
-            time.sleep(args.queue_poll_interval or args.poll_interval)
+            time.sleep(args.poll_interval)
             continue
 
         # reset idle marker since we got work

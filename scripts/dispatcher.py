@@ -8,6 +8,7 @@ import time
 import argparse
 import shutil
 import traceback
+import json
 
 
 def list_csv(path):
@@ -49,17 +50,16 @@ def main():
     p.add_argument(
         "--in-progress-dir", required=True, help="base dir for worker subdirs"
     )
-    p.add_argument("--outputs-dir", required=True)
     p.add_argument("--workers", type=int, required=True)
     p.add_argument("--segments-per-claim", type=int, default=1)
-    p.add_argument("--poll-interval", type=float, default=1.0)
-    p.add_argument("--max-idle", type=int, default=30)
+    p.add_argument("--poll-interval-seconds", type=float, default=1.0)
+    p.add_argument("--max-idle-cycles", type=int, default=30)
     args = p.parse_args()
 
     pool = args.pool_dir
     workers = [f"worker_{i}" for i in range(1, args.workers + 1)]
 
-    # ensure per-worker queue and in_progress dirs exist and emit a ready token
+    # ensure per-worker queue and in_progress dirs exist
     for w in workers:
         q = os.path.join(args.in_progress_dir, w, "queue")
         ip = os.path.join(args.in_progress_dir, w, "in_progress")
@@ -69,13 +69,20 @@ def main():
     idle = 0
     while True:
         try:
+            # check if pool has files, iterate a few times in case there is delay in pool being populated
             pool_files = list_csv(pool)
             if not pool_files:
                 idle += 1
-                if idle > args.max_idle:
-                    # done
+                if idle > args.max_idle_cycles:
+                    try:
+                        done_path = os.path.join(os.getcwd(), "dispatcher.done")
+                        with open(done_path, "w") as fh:
+                            json.dump(vars(args), fh)
+                            fh.write("\n")
+                    except Exception:
+                        traceback.print_exc()
                     break
-                time.sleep(args.poll_interval)
+                time.sleep(args.poll_interval_seconds)
                 continue
             idle = 0
 
@@ -94,7 +101,8 @@ def main():
                 pool_files = list_csv(pool)
         except Exception:
             traceback.print_exc()
-            time.sleep(args.poll_interval)
+            time.sleep(args.poll_interval_seconds)
+
 
 if __name__ == "__main__":
     main()

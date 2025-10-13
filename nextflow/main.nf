@@ -1,15 +1,15 @@
 #!/usr/bin/env nextflow
 
 // Pipeline parameters are defined in nextflow/pipeline.env
-// Minimal fallbacks used below when necessary by the pipeline.
-params.workers = params.workers ?: 4
-params.cpus = params.cpus ?: 1
-params.alpaca_args = params.alpaca_args ?: ''
-params.worker_logs = params.worker_logs ?: 0
-params.segments_per_claim = params.segments_per_claim ?: System.getenv('SEGMENTS_PER_CLAIM')?.toInteger() ?: 1
+
+// Print params to the console at pipeline startup
+println "=== Pipeline params ==="
+params.sort().each { k, v -> println "${k} = ${v}" }
 workflow {
     // Prepare the lightweight symlink pool once before starting workers - workers will claimed unsolved segments from here
     def pool = preparePool()
+    // once pool is ready, start the dispatcher; it monitors workers progress and tops up each workers queue
+    runDispatcher(pool)
     def worker_input = pool.flatMap { segfile ->
     (1..params.workers).collect { wid -> [wid, segfile] }}
     // run workers in parallel
@@ -17,11 +17,13 @@ workflow {
     def all_workers_done = worker_done_ch.collect()
     // run merge after all workers finished
     def merge = mergeSegments(all_workers_done)
+    // once workers are done, run report summariser
+    summariseReports(all_workers_done)
     // validate results: collect the prepared segments list (pool.out) and merged segments list (merge.out) and compare
     def expected_ch = pool.collect()
     def actual_ch = merge.collect()
     def (missing_ch, validation_token_ch) = validateResults(expected_ch, actual_ch)
-    missing_ch.subscribe { println "validation missing file: ${it}" }
+    //missing_ch.subscribe { println "validation missing file: ${it}" }
     // run cleanup only if validation emits a done token
     cleanup(validation_token_ch)
 }
@@ -50,6 +52,7 @@ process workerTask {
             --outputs-dir ${params.outputs_dir} \
             --cpus ${task.cpus} \
             --segments-per-claim ${params.segments_per_claim} \
+            --max-idle-seconds ${params.max_idle_seconds} \
             --log-level ${params.worker_logs} \
                 --alpaca-args '${params.alpaca_args}'
     # emit a simple local done token file so the workflow knows this worker finished
@@ -60,6 +63,34 @@ process workerTask {
     cp worker_${worker_id}.done ${params.outputs_dir}/worker_${worker_id}.done || true
     """
 }
+
+
+process runDispatcher {
+    // Use runtime-provided conda env if set
+    conda params.conda_env
+    label 'worker_high'
+    tag 'dispatcher'
+    cpus params.cpus
+
+    input:
+    file pool_ready_token
+
+    output:
+    file 'dispatcher.done'
+
+    script:
+    """
+    python3 ${params.script_dir}/dispatcher.py \
+        --pool-dir ${params.pool_dir} \
+        --in-progress-dir ${params.in_progress_dir} \
+        --workers ${params.workers} \
+        --segments-per-claim ${params.segments_per_claim} \
+        --poll-interval-seconds ${params.dispatcher_poll_interval_seconds} \
+        --max-idle-cycles ${params.dispatcher_max_idle_cycles}
+    cp dispatcher.done ${params.outputs_dir}/dispatcher.done || true
+    """
+}
+
 
 process preparePool {
     // Use runtime-provided conda env if set
@@ -92,7 +123,7 @@ process preparePool {
             done || true
         fi
 
-        # Remove any pool entries already present in done_dir (skip reprocessing)
+        # Remove any pool entries already present in done_dir to avoid reprocessing
         if [ -d "${params.done_dir}" ]; then
             for ppath in "${params.pool_dir}"/*; do
                 [ -e "\$ppath" ] || continue
@@ -104,7 +135,7 @@ process preparePool {
             done || true
         fi
 
-        # create a canonical list of segments the workers should process
+        # create the list of segments the workers should process
         ls -1 ${params.pool_dir} | sort > segments_to_process.txt
         echo ready > pool_ready.txt
         echo ready > ${params.outputs_dir}/pool_ready.txt
@@ -129,15 +160,14 @@ process mergeSegments {
     """
     mkdir -p ${params.outputs_dir}/merged
     python ${params.script_dir}/merge_segments.py \
-            --segments-dir ${params.outputs_dir} \
+            --segments-dir ${params.outputs_dir}/segment_outputs \
             --out ${params.outputs_dir}/merged/all_tumours_combined.csv \
             --input-dir ${params.cohort_dir}/input
 
-
-    # emit a list of merged segment files (based on outputs_dir contents), portable
-    ls -1 ${params.outputs_dir}/*.csv 2>/dev/null | xargs -n1 basename | sort > merged_segments.txt || true
     """
 }
+
+
 
 process validateResults {
     // Use runtime-provided conda env if set
@@ -168,6 +198,34 @@ process validateResults {
     else
         echo done > validation_done.token
     fi
+    """
+}
+
+process summariseReports {
+    // Use runtime-provided conda env if set
+    conda params.conda_env
+    label 'low'
+    tag 'summariseReports'
+    cpus params.cpus
+
+    input:
+    val(done_list)
+
+    output:
+    file 'ci_modified_report.csv'
+
+    script:
+    """
+    mkdir -p ${params.outputs_dir}/reports
+    python ${params.script_dir}/summarise_reports.py ${params.outputs_dir}/segment_outputs ${params.delete_reports.toInteger() ? '--delete' : ''}
+    # copy to alpaca-work for debugging
+    cp ci_modified_report.csv ${params.outputs_dir}/reports/ci_modified_report.csv || true
+    cp monoclonal_samples_report.csv ${params.outputs_dir}/reports/monoclonal_samples_report.csv || true
+    cp elbow_increase_report.csv ${params.outputs_dir}/reports/elbow_increase_report.csv || true
+    # copy to cohort directory:
+    cp ci_modified_report.csv ${params.cohort_dir}/output/reports/ci_modified_report.csv || true
+    cp monoclonal_samples_report.csv ${params.cohort_dir}/output/reports/monoclonal_samples_report.csv || true
+    cp elbow_increase_report.csv ${params.cohort_dir}/output/reports/elbow_increase_report.csv || true
     """
 }
 

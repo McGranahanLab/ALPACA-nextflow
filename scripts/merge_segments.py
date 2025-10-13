@@ -18,6 +18,8 @@ def main():
             continue
         if "combined" in f:
             continue
+        if 'report' in f:
+            continue
         df = pd.read_csv(os.path.join(args.segments_dir, f))
         seg_dfs.append(df)
     final = pd.concat(seg_dfs, ignore_index=True)
@@ -25,13 +27,20 @@ def main():
     segments_out = set(final['tumour_id'] + '_' + final['segment'].astype(str))
     input_dfs = []
     for tumour_id in os.listdir(args.input_dir):
-        tumour_df = pd.read_csv(os.path.join(args.input_dir, tumour_id, 'ALPACA_input_table.csv'))
-        input_dfs.append(tumour_df)
+        try:
+            tumour_df = pd.read_csv(os.path.join(args.input_dir, tumour_id, 'ALPACA_input_table.csv'))
+            input_dfs.append(tumour_df)
+        except Exception as e:
+            print(f"Error reading {tumour_id}: {e}")
     input_df = pd.concat(input_dfs)
     segments_in = set(input_df['tumour_id'] + '_' + input_df['segment'].astype(str))
     missing_segments = segments_in - segments_out
     if len(missing_segments) == 0:
         final.to_csv(args.out, index=False)
+        # write merged_segments.txt, each segment on a new line:
+        with open(os.path.join('merged_segments.txt'), 'w') as f:
+            for seg in sorted(segments_in):
+                f.write(f"{seg}\n")
     else:
         print(f"Missing {len(missing_segments)} segments in output: {missing_segments}")
         # throw error

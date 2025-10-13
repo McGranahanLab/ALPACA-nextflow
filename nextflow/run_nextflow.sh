@@ -45,10 +45,16 @@ NXF_ARGS+=( --debug "${DEBUG:-0}" )
 NXF_ARGS+=( --conda_env "${CONDA_ENV:-}" )
 NXF_ARGS+=( --segments_per_claim "${SEGMENTS_PER_CLAIM:-1}" )
 NXF_ARGS+=( --worker_logs "${WORKER_LOGS:-0}" )
+NXF_ARGS+=( --dispatcher_poll_interval_seconds "${DISPATCHER_POLL_INTERVAL_SECONDS:-${DISPATCHER_POLL_INTERVAL:-1}}" )
+NXF_ARGS+=( --dispatcher_max_idle_cycles "${DISPATCHER_MAX_IDLE_CYCLES:-${DISPATCHER_MAX_IDLE:-30}}" )
 NXF_ARGS+=( -with-report "${NFX_REPORTS}/report_${timestamp}.html" )
+NXF_ARGS+=( --max_idle_seconds "${MAX_IDLE_SECONDS:-600}" )
+NXF_ARGS+=( --delete_reports "${DELETE_REPORTS:-0}" )
+
 if [ -n "${ALPACA_ARGS:-}" ]; then
-	NXF_ARGS+=( --alpaca_args "${ALPACA_ARGS}" )
+	NXF_ARGS+=( "--alpaca_args=${ALPACA_ARGS}" )
 fi
+
 
 for a in "$@"; do
 	NXF_ARGS+=( "$a" )
