@@ -79,7 +79,8 @@ for tumour_entry in input_root.iterdir():
 
     for src_path in segment_paths:
         src = Path(src_path)
-        f = src.name
+        # sanitize filename: ensure no whitespaces or newlines
+        f = src.name.strip()
         dst = pool_dir / f
         try:
             if dst.exists() or dst.is_symlink():

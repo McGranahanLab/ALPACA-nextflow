@@ -539,15 +539,14 @@ def main():
 
         # Move each processed claimed file to done or failed depending on its group's result
         for p in claimed_paths:
-            rel = os.path.relpath(p, args.worker_in_progress)
             tumour = (
                 os.path.basename(p).replace("ALPACA_input_table_", "").split("_", 1)[0]
             )
             success = group_results.get(tumour, False)
             if success:
-                dest = os.path.join(args.done_dir, rel)
+                dest = os.path.join(args.done_dir, os.path.basename(p))
             else:
-                dest = os.path.join(args.failed_dir, rel)
+                dest = os.path.join(args.failed_dir, os.path.basename(p))
 
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             try:

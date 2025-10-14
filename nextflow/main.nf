@@ -108,19 +108,16 @@ process preparePool {
             --cohort_dir ${params.cohort_dir} \
             --pool_dir ${params.pool_dir}
         mkdir -p ${params.outputs_dir}
-        # If there are leftover files in in_progress (previous failed run), move them back to the pool
-        if [ -d "${params.in_progress_dir}" ]; then
-            for fpath in \$(find "${params.in_progress_dir}" -type f -name '*.csv' -print); do
-                bn=\$(basename "\$fpath")
-                # move back to pool if not already present
-                if [ ! -e "${params.pool_dir}/\$bn" ]; then
-                    mkdir -p "${params.pool_dir}"
-                    mv -n "\$fpath" "${params.pool_dir}/\$bn" || true
-                else
-                    # remove the leftover file to avoid duplicates
-                    rm -f "\$fpath" || true
-                fi
-            done || true
+        if [ "${params.restart}" = "1" ]; then
+            echo "Restart requested: clearing dispatcher and worker tokens and removing failed/in_progress directories"
+            # remove dispatcher token if present
+            rm -f ${params.outputs_dir}/dispatcher.done || true
+            # remove per-worker tokens in outputs dir
+            rm -f ${params.outputs_dir}/worker_*.done || true
+            # remove failed dir contents and in_progress subdirs so pool is recreated from input
+            rm -rf ${params.failed_dir} || true
+            rm -rf ${params.in_progress_dir} || true
+            mkdir -p ${params.failed_dir} ${params.in_progress_dir}
         fi
 
         # Remove any pool entries already present in done_dir to avoid reprocessing
@@ -129,7 +126,7 @@ process preparePool {
                 [ -e "\$ppath" ] || continue
                 bn=\$(basename "\$ppath")
                 # search done_dir recursively for a matching basename
-                if find "${params.done_dir}" -type f -name "\$bn" -print -quit | grep -q .; then
+                if find "${params.done_dir}" -type l -name "\$bn" -print -quit | grep -q .; then
                     rm -f "\$ppath" || true
                 fi
             done || true
@@ -137,8 +134,8 @@ process preparePool {
 
         # create the list of segments the workers should process
         ls -1 ${params.pool_dir} | sort > segments_to_process.txt
-        echo ready > pool_ready.txt
-        echo ready > ${params.outputs_dir}/pool_ready.txt
+        echo ready > pool_ready.done
+        echo ready > ${params.outputs_dir}/pool_ready.done
     """
 
 }

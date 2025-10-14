@@ -50,6 +50,7 @@ NXF_ARGS+=( --dispatcher_max_idle_cycles "${DISPATCHER_MAX_IDLE_CYCLES:-${DISPAT
 NXF_ARGS+=( -with-report "${NFX_REPORTS}/report_${timestamp}.html" )
 NXF_ARGS+=( --max_idle_seconds "${MAX_IDLE_SECONDS:-600}" )
 NXF_ARGS+=( --delete_reports "${DELETE_REPORTS:-0}" )
+NXF_ARGS+=( --restart "${RESTART:-0}" )
 
 if [ -n "${ALPACA_ARGS:-}" ]; then
 	NXF_ARGS+=( "--alpaca_args=${ALPACA_ARGS}" )

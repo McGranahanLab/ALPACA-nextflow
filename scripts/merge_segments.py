@@ -26,7 +26,7 @@ def main():
     # before saving, ensure that all the expected segments are present
     segments_out = set(final['tumour_id'] + '_' + final['segment'].astype(str))
     input_dfs = []
-    for tumour_id in os.listdir(args.input_dir):
+    for tumour_id in [x for x in os.listdir(args.input_dir) if x != '.DS_Store']:
         try:
             tumour_df = pd.read_csv(os.path.join(args.input_dir, tumour_id, 'ALPACA_input_table.csv'))
             input_dfs.append(tumour_df)
