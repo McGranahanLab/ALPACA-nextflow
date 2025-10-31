@@ -160,7 +160,11 @@ def run_alpaca_on_segment(claimed_paths, args):
     basenames = [os.path.basename(p) for p in claimed_paths]
     first = basenames[0]
     tumour = first.replace("ALPACA_input_table_", "").split("_", 1)[0]
-    tumour_cohort_dir = os.path.join(args.cohort_dir, "input", tumour)
+    # determine tumour input directory: prefer explicit input_dir, else use cohort_dir/input/<tumour>
+    if getattr(args, 'input_dir', None):
+        tumour_cohort_dir = os.path.join(args.input_dir, tumour)
+    else:
+        tumour_cohort_dir = os.path.join(args.cohort_dir, "input", tumour)
     tumour_in_progress = os.path.join(args.worker_in_progress, 'in_progress')
     segment_solution_output_dir = os.path.join(args.outputs_dir, "segment_outputs")
     
@@ -196,7 +200,8 @@ def run_alpaca_on_segment(claimed_paths, args):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--cohort_dir", required=True)
+    p.add_argument("--cohort_dir", required=False)
+    p.add_argument("--input_dir", required=False, help="Optional explicit input root (overrides COHORT_DIR/input)")
     p.add_argument("--pool-dir", required=True)
     p.add_argument("--in-progress-dir", required=True)
     p.add_argument(

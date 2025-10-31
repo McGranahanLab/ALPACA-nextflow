@@ -44,6 +44,7 @@ process workerTask {
     """
         python3 ${params.script_dir}/segment_worker.py \
             --cohort_dir ${params.cohort_dir} \
+            --input_dir ${params.input_dir} \
             --pool-dir ${params.pool_dir} \
             --in-progress-dir ${params.in_progress_dir} \
             --worker-id ${worker_id} \
@@ -105,8 +106,9 @@ process preparePool {
     script:
     """
     python3 ${params.script_dir}/create_symlink_pool.py \
-            --cohort_dir ${params.cohort_dir} \
-            --pool_dir ${params.pool_dir}
+        --cohort_dir ${params.cohort_dir} \
+        --input_dir ${params.input_dir} \
+        --pool_dir ${params.pool_dir}
         mkdir -p ${params.outputs_dir}
         if [ "${params.restart}" = "1" ]; then
             echo "Restart requested: clearing dispatcher and worker tokens and removing failed/in_progress directories"
@@ -219,10 +221,11 @@ process summariseReports {
     cp ci_modified_report.csv ${params.outputs_dir}/reports/ci_modified_report.csv || true
     cp monoclonal_samples_report.csv ${params.outputs_dir}/reports/monoclonal_samples_report.csv || true
     cp elbow_increase_report.csv ${params.outputs_dir}/reports/elbow_increase_report.csv || true
-    # copy to cohort directory:
-    cp ci_modified_report.csv ${params.cohort_dir}/output/reports/ci_modified_report.csv || true
-    cp monoclonal_samples_report.csv ${params.cohort_dir}/output/reports/monoclonal_samples_report.csv || true
-    cp elbow_increase_report.csv ${params.cohort_dir}/output/reports/elbow_increase_report.csv || true
+    # copy to user-specified output directory
+    mkdir -p ${params.output_dir}/reports
+    cp ci_modified_report.csv ${params.output_dir}/reports/ci_modified_report.csv || true
+    cp monoclonal_samples_report.csv ${params.output_dir}/reports/monoclonal_samples_report.csv || true
+    cp elbow_increase_report.csv ${params.output_dir}/reports/elbow_increase_report.csv || true
     """
 }
 
@@ -243,8 +246,8 @@ process cleanup {
             echo "validation failed, not running cleanup" > cleanup_failed.token
             exit 2
         fi
-        mkdir -p ${params.cohort_dir}/output/cohort_results
-        cp -r ${params.outputs_dir}/merged/* ${params.cohort_dir}/output/cohort_results/ || true
+        mkdir -p ${params.output_dir}/cohort_results
+        cp -r ${params.outputs_dir}/merged/* ${params.output_dir}/cohort_results/ || true
         # remove alpaca_work directory if it exists and debug mode is not set:
         if [ "${params.debug}" != "0" ] && [ "${params.debug}" != "false" ]; then
             echo "debug mode is on, not removing alpaca_work directory" > debug_mode.token

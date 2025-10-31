@@ -25,6 +25,8 @@ DONE_DIR="$(realpath "${DONE_DIR:-$REPO_ROOT/dev/multi-tumour/done}")"
 FAILED_DIR="$(realpath "${FAILED_DIR:-$REPO_ROOT/dev/multi-tumour/failed}")"
 OUTPUTS_DIR="$(realpath "${OUTPUTS_DIR:-$REPO_ROOT/dev/multi-tumour/outputs}")"
 COHORT_DIR="$(realpath "${COHORT_DIR:-$REPO_ROOT/dev/multi-tumour/cohort}")"
+INPUT_DIR="$(realpath "${INPUT_DIR:-${COHORT_DIR}/input}")"
+OUTPUT_DIR="$(realpath "${OUTPUT_DIR:-${COHORT_DIR}/output}")"
 ALPACA_WORK="$(realpath "${ALPACA_WORK:-$REPO_ROOT/dev/alpaca-work}")"
 NFX_REPORTS="$(realpath "${NFX_REPORTS:-$REPO_ROOT/nextflow/reports}")"
 
@@ -34,6 +36,8 @@ NXF_ARGS=( run main.nf -profile "${ENV_PROFILE:-local}" )
 NXF_ARGS+=( --alpaca_work_dir "${ALPACA_WORK}" )
 NXF_ARGS+=( --pool_dir "${POOL_DIR}" )
 NXF_ARGS+=( --cohort_dir "${COHORT_DIR}" )
+NXF_ARGS+=( --input_dir "${INPUT_DIR}" )
+NXF_ARGS+=( --output_dir "${OUTPUT_DIR}" )
 NXF_ARGS+=( --in_progress_dir "${IN_PROGRESS_DIR}" )
 NXF_ARGS+=( --done_dir "${DONE_DIR}" )
 NXF_ARGS+=( --failed_dir "${FAILED_DIR}" )
@@ -63,8 +67,8 @@ done
 
 echo executing nextflow "${NXF_ARGS[@]}"
 # persist configuration used for this run
-mkdir -p "$COHORT_DIR/output/reports"
-cp "$REPO_ROOT/nextflow/$RUN_CONFIG" "$COHORT_DIR/output/reports/used_config_${timestamp}.env"
+mkdir -p "$OUTPUT_DIR/reports"
+cp "$REPO_ROOT/nextflow/$RUN_CONFIG" "$OUTPUT_DIR/reports/used_config_${timestamp}.env"
 
 pushd "$REPO_ROOT/nextflow" >/dev/null
 nextflow "${NXF_ARGS[@]}"

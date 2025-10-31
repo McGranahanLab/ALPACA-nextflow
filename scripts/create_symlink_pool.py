@@ -37,6 +37,7 @@ def split_to_segments(tumour_dir: str) -> list[str]:
 
 p = argparse.ArgumentParser()
 p.add_argument("--cohort_dir", required=True)
+p.add_argument("--input_dir", required=False, help='Optional explicit input root (overrides COHORT_DIR/input)')
 p.add_argument("--pool_dir", required=True)
 p.add_argument(
     "--tumours",
@@ -47,6 +48,7 @@ p.add_argument(
 args = p.parse_args()
 
 cohort_dir = Path(args.cohort_dir)
+input_dir_arg = Path(args.input_dir) if args.input_dir else None
 pool_dir = Path(args.pool_dir)
 if args.tumours:
     tumours_filter = set([t.strip() for t in args.tumours.split(",") if t.strip()])
@@ -58,10 +60,13 @@ if not cohort_dir.exists():
 
 pool_dir.mkdir(parents=True, exist_ok=True)
 
-input_root = cohort_dir / "input"
-if not input_root.exists():
-    # if user passed a directory that already contains tumour subdirs directly, use cohort_dir
-    input_root = cohort_dir
+if input_dir_arg:
+    input_root = input_dir_arg
+else:
+    input_root = cohort_dir / "input"
+    if not input_root.exists():
+        # if user passed a directory that already contains tumour subdirs directly, use cohort_dir
+        input_root = cohort_dir
 
 count = 0
 for tumour_entry in input_root.iterdir():
