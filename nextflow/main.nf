@@ -47,7 +47,6 @@ process workerTask {
             --input_dir ${params.input_dir} \
             --in-progress-dir ${params.in_progress_dir} \
             --worker-id ${worker_id} \
-            --done-dir ${params.done_dir} \
             --failed-dir ${params.failed_dir} \
             --outputs-dir ${params.outputs_dir} \
             --cpus ${task.cpus} \

@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""Worker that claims segment CSVs from a pool and runs ALPACA in segment mode.
-
-This script is designed for Nextflow workers or long-lived local workers.
-"""
 import os
 import sys
 import errno
@@ -79,7 +75,6 @@ def main():
         default=None,
         help="Optional worker id used to create worker-specific in_progress subdir",
     )
-    p.add_argument("--done-dir", required=True)
     p.add_argument("--failed-dir", required=True)
     p.add_argument("--outputs-dir", required=True)
     p.add_argument("--cpus", default=1, type=int)
@@ -114,7 +109,6 @@ def main():
     args.worker_in_progress = worker_in_progress
 
     os.makedirs(args.in_progress_dir, exist_ok=True)
-    os.makedirs(args.done_dir, exist_ok=True)
     os.makedirs(args.failed_dir, exist_ok=True)
     os.makedirs(args.outputs_dir, exist_ok=True)
     # ensure subdirs for segment outputs and worker logs
@@ -130,11 +124,7 @@ def main():
     worker_active_dir = os.path.join(worker_in_progress, "in_progress")
     os.makedirs(worker_queue_dir, exist_ok=True)
     os.makedirs(worker_active_dir, exist_ok=True)
-    # idle tracking is now handled via last_work_ts in worker_log
-    # cache of done basenames to avoid rescanning the done_dir on each claim
-    done_basenames = set()
-    done_cache_last = 0
-    done_cache_ttl = 30.0  # seconds
+
     # Initiate a log to record all the file paths and operations perfomed by this worker
     worker_log = {
         "worker_id": args.worker_id or f"pid_{os.getpid()}",
@@ -149,48 +139,15 @@ def main():
     worker_log["params"] = {
         "in_progress_dir": args.in_progress_dir,
         "outputs_dir": args.outputs_dir,
-        "done_dir": args.done_dir,
         "failed_dir": args.failed_dir,
         "cohort_dir": args.cohort_dir,
     }
 
-    # diagnostic heartbeat file (updated each loop) so external tooling can see worker is alive
+    # diagnostic heartbeat file (updated each loop)
     heartbeat_path = os.path.join(
         worker_logs_dir, f"worker_{worker_log['worker_id']}.heartbeat"
     )
 
-    # Do quick existence/listing checks immediately and flush the log so it's
-    # available even if the worker finds no work.
-    path_checks = {}
-    for name, path_val in worker_log["params"].items():
-        try:
-            exists = os.path.exists(path_val)
-            entries = []
-            if exists and os.path.isdir(path_val):
-                try:
-                    entries = os.listdir(path_val)
-                except Exception:
-                    entries = []
-            path_checks[name] = {"exists": exists, "entry_count": len(entries)}
-        except Exception as e:
-            path_checks[name] = {"error": str(e)}
-    worker_log["initial_path_checks"] = path_checks
-
-    # flush initial worker log immediately
-    try:
-        outname = f"worker_{worker_log['worker_id']}.done.log"
-        outpath = os.path.join(worker_logs_dir, outname)
-        tmp = outpath + f".tmp.{os.getpid()}.{int(time.time()*1000)}"
-        with open(tmp, "w") as fh:
-            json.dump(worker_log, fh, indent=2)
-            fh.flush()
-            try:
-                os.fsync(fh.fileno())
-            except Exception:
-                pass
-        os.replace(tmp, outpath)
-    except Exception:
-        traceback.print_exc()
     while True:
         # update heartbeat
         try:
@@ -199,27 +156,11 @@ def main():
         except Exception:
             pass
 
-        # refresh done_dir cache periodically
-        try:
-            nowt = time.time()
-            if nowt - done_cache_last > done_cache_ttl:
-                new_done = set()
-                try:
-                    for root, _, files in os.walk(args.done_dir):
-                        for f in files:
-                            new_done.add(f)
-                except Exception:
-                    new_done = done_basenames
-                done_basenames = new_done
-                done_cache_last = nowt
-        except Exception:
-            pass
-        # Inspect per-worker queue instead of global pool
         try:
             q_entries = sorted(os.listdir(worker_queue_dir))
         except Exception:
             q_entries = []
-        q_sample = [f for f in q_entries if f.endswith(".csv")][:20]
+        q_sample = [f for f in q_entries if f.endswith(".csv")]
         msg = f"Inspecting queue_dir={worker_queue_dir!r} total_entries={len(q_entries)} csv_sample_count={len(q_sample)}"
         print(msg)
         worker_log.setdefault("messages", []).append(
@@ -324,7 +265,6 @@ def main():
                         "ts": datetime.now().isoformat() + "Z",
                         "idle_seconds": idle_seconds,
                         "queue_snapshot": worker_log.get("queue_snapshots", [])[-5:],
-                        "done_count": len(done_basenames),
                     }
                     diag_path = os.path.join(
                         worker_logs_dir, f"worker_{worker_log['worker_id']}.stuck.json"
