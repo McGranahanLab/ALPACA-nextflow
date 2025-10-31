@@ -15,6 +15,13 @@ if [ -f "$REPO_ROOT/nextflow/$RUN_CONFIG" ]; then
 	source "$REPO_ROOT/nextflow/$RUN_CONFIG"
 fi
 
+# Pool and intermediate directories (relative to repo root or absolute)
+POOL_DIR="$ALPACA_WORK/pool"
+IN_PROGRESS_DIR="$ALPACA_WORK/in_progress"
+DONE_DIR="$ALPACA_WORK/done"
+FAILED_DIR="$ALPACA_WORK/failed"
+OUTPUTS_DIR="$ALPACA_WORK/outputs"
+
 mkdir -p "$ALPACA_WORK" "$POOL_DIR" "$IN_PROGRESS_DIR" "$DONE_DIR" "$FAILED_DIR" "$OUTPUTS_DIR" "$NFX_REPORTS"
 
 SCRIPT_DIR="$(realpath "${SCRIPT_DIR:-$REPO_ROOT}")"
