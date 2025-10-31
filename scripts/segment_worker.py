@@ -17,136 +17,6 @@ from datetime import datetime
 import shlex
 
 
-def claim_segment(pool_dir, in_progress_dir, done_dir, done_basenames=None):
-    # Look for CSV files directly under pool_dir and atomically claim by
-    # moving them into the worker-specific in_progress_dir.
-    # If a basename already exists in done_dir, remove the pool entry and skip it.
-    try:
-        pool_entries = os.listdir(pool_dir)
-    except Exception:
-        pool_entries = []
-    for segment_file in pool_entries:
-        if not segment_file.endswith(".csv"):
-            continue
-
-        # If this segment already exists in done_dir, remove it from pool and skip
-        try:
-            # consult cached done basenames if provided to avoid expensive walks
-            if done_basenames is not None:
-                if segment_file in done_basenames:
-                    try:
-                        os.remove(os.path.join(pool_dir, segment_file))
-                        print(
-                            f"Skipping already-done segment {segment_file}; removed pool entry (cache)"
-                        )
-                    except Exception:
-                        pass
-                    continue
-            else:
-                already = False
-                for root, _, files in os.walk(done_dir):
-                    if segment_file in files:
-                        already = True
-                        break
-                if already:
-                    try:
-                        os.remove(os.path.join(pool_dir, segment_file))
-                        print(
-                            f"Skipping already-done segment {segment_file}; removed pool entry"
-                        )
-                    except Exception:
-                        pass
-                    continue
-        except Exception:
-            # if done_dir scanning fails, proceed to attempt claim
-            pass
-        src = os.path.join(pool_dir, segment_file)
-        dst = os.path.join(in_progress_dir, segment_file)
-        # try a few times per entry to handle transient races
-        for attempt in range(3):
-            try:
-                # record dev ids if possible for debugging (same-FS requirement)
-                try:
-                    sdev = os.stat(src).st_dev
-                except Exception:
-                    sdev = None
-                try:
-                    ddev = os.stat(os.path.dirname(dst)).st_dev
-                except Exception:
-                    ddev = None
-                # attempt atomic rename (fast path)
-                os.rename(src, dst)
-                return dst
-            except FileNotFoundError:
-                # someone else may have claimed it
-                break
-            except OSError as e:
-                err = getattr(e, "errno", None)
-                msg = str(e)
-                # if cross-device link error, try copy+replace fallback
-                if err == errno.EXDEV:
-                    tmp = None
-                    try:
-                        # copy to a temp file in in_progress_dir then atomic replace
-                        tmp = os.path.join(
-                            in_progress_dir, f".{segment_file}.tmp.{os.getpid()}"
-                        )
-                        shutil.copy2(src, tmp)
-                        try:
-                            with open(tmp, "rb") as tf:
-                                try:
-                                    os.fsync(tf.fileno())
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
-                        os.replace(tmp, dst)
-                        # remove original src if still exists
-                        try:
-                            os.remove(src)
-                        except Exception:
-                            pass
-                        return dst
-                    except Exception as e2:
-                        # log fallback failure
-                        try:
-                            dbg_path = os.path.join(
-                                in_progress_dir, f"claim_error.{segment_file}.log"
-                            )
-                            with open(dbg_path, "a") as df:
-                                df.write(
-                                    f"fallback failed: {e2} primary_errno={err} primary_msg={msg} sdev={sdev} ddev={ddev}\n"
-                                )
-                        except Exception:
-                            pass
-                        # cleanup temp
-                        try:
-                            if tmp and os.path.exists(tmp):
-                                os.remove(tmp)
-                        except Exception:
-                            pass
-                        # retry a couple times
-                        time.sleep(0.1)
-                        continue
-                else:
-                    # non-EXDEV OSError: log diagnostics and retry a bit
-                    try:
-                        dbg_path = os.path.join(
-                            in_progress_dir, f"claim_error.{segment_file}.log"
-                        )
-                        with open(dbg_path, "a") as df:
-                            df.write(
-                                f"rename failed: src={src} dst={dst} errno={err} msg={msg} sdev={sdev} ddev={ddev}\n"
-                            )
-                    except Exception:
-                        pass
-                    time.sleep(0.05)
-                    continue
-        # end attempts for this file -> move to next file
-        continue
-    return None
-
-
 def run_alpaca_on_segment(claimed_paths, args):
     """
     Run ALPACA on a list of claimed segment files (all located in the worker_in_progress dir).
@@ -202,7 +72,6 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--cohort_dir", required=False)
     p.add_argument("--input_dir", required=False, help="Optional explicit input root (overrides COHORT_DIR/input)")
-    p.add_argument("--pool-dir", required=True)
     p.add_argument("--in-progress-dir", required=True)
     p.add_argument(
         "--worker-id",
@@ -239,14 +108,8 @@ def main():
 
     args = p.parse_args()
     # create a per-worker in_progress directory to avoid cross-worker races
-    if args.worker_id:
-        worker_in_progress = os.path.join(
-            args.in_progress_dir, f"worker_{args.worker_id}"
-        )
-    else:
-        # fallback to pid-based worker dir
-        worker_in_progress = os.path.join(args.in_progress_dir, f"worker_{os.getpid()}")
-    os.makedirs(worker_in_progress, exist_ok=True)
+    worker_in_progress = os.path.join(
+            args.in_progress_dir, f"worker_{args.worker_id}")
     # expose the per-worker in_progress dir as the working in_progress dir
     args.worker_in_progress = worker_in_progress
 
@@ -284,7 +147,6 @@ def main():
     }
     # Record the provided path params
     worker_log["params"] = {
-        "pool_dir": args.pool_dir,
         "in_progress_dir": args.in_progress_dir,
         "outputs_dir": args.outputs_dir,
         "done_dir": args.done_dir,
@@ -329,22 +191,6 @@ def main():
         os.replace(tmp, outpath)
     except Exception:
         traceback.print_exc()
-    # print an explicit startup message about where this worker will look
-    try:
-        pool_chk = worker_log["initial_path_checks"].get("pool_dir", {})
-        msg = (
-            f"Worker starting: looking at pool_dir={args.pool_dir!r} exists={pool_chk.get('exists')}"
-            f" entry_count={pool_chk.get('entry_count')}"
-        )
-        print(msg)
-        worker_log.setdefault("messages", []).append(
-            {
-                "ts": datetime.now().isoformat() + "Z",
-                "msg": msg,
-            }
-        )
-    except Exception:
-        pass
     while True:
         # update heartbeat
         try:

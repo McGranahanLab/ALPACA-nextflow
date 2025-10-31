@@ -45,7 +45,6 @@ process workerTask {
         python3 ${params.script_dir}/segment_worker.py \
             --cohort_dir ${params.cohort_dir} \
             --input_dir ${params.input_dir} \
-            --pool-dir ${params.pool_dir} \
             --in-progress-dir ${params.in_progress_dir} \
             --worker-id ${worker_id} \
             --done-dir ${params.done_dir} \
