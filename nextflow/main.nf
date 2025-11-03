@@ -17,6 +17,8 @@ workflow {
     def all_workers_done = worker_done_ch.collect()
     // run merge after all workers finished
     def merge = mergeSegments(all_workers_done)
+    // run the analysis:
+    def analysis_token = analysis(merge)
     // once workers are done, run report summariser
     summariseReports(all_workers_done)
     // validate results: collect the prepared segments list (pool.out) and merged segments list (merge.out) and compare
@@ -25,7 +27,7 @@ workflow {
     def (missing_ch, validation_token_ch) = validateResults(expected_ch, actual_ch)
     //missing_ch.subscribe { println "validation missing file: ${it}" }
     // run cleanup only if validation emits a done token
-    cleanup(validation_token_ch)
+    cleanup(validation_token_ch,analysis_token)
 }
 
 
@@ -64,11 +66,9 @@ process workerTask {
 
 
 process runDispatcher {
-    // Use runtime-provided conda env if set
     conda params.conda_env
     label 'worker_high'
     tag 'dispatcher'
-    cpus params.cpus
 
     input:
     file pool_ready_token
@@ -91,11 +91,9 @@ process runDispatcher {
 
 
 process preparePool {
-    // Use runtime-provided conda env if set
     conda params.conda_env
     label 'low'
     tag 'preparePool'
-    cpus params.cpus
 
     output:
     file 'segments_to_process.txt'
@@ -139,11 +137,9 @@ process preparePool {
 }
 
 process mergeSegments {
-    // Use runtime-provided conda env if set
     conda params.conda_env
     label 'low'
     tag 'mergeSegments'
-    cpus params.cpus
 
     input:
     val(done_list)
@@ -165,11 +161,9 @@ process mergeSegments {
 
 
 process validateResults {
-    // Use runtime-provided conda env if set
     conda params.conda_env
     label 'low'
     tag 'validateResults'
-    cpus params.cpus
 
     input:
     file expected_list
@@ -197,11 +191,9 @@ process validateResults {
 }
 
 process summariseReports {
-    // Use runtime-provided conda env if set
     conda params.conda_env
     label 'low'
     tag 'summariseReports'
-    cpus params.cpus
 
     input:
     val(done_list)
@@ -226,14 +218,13 @@ process summariseReports {
 }
 
 process cleanup {
-    // Use runtime-provided conda env if set
     conda params.conda_env
     label 'low'
     tag 'cleanup'
-    cpus params.cpus
 
     input:
     file 'validation_done.token'
+    file 'analysis_done.token'
 
     script:
     """
@@ -254,4 +245,49 @@ process cleanup {
     """
     output:
     file 'cleanup_done.token'
+}
+
+process analysis {
+    conda params.conda_env
+    label 'low'
+    tag 'analysis'
+
+    input:
+    file 'merged_segments.txt' // start analysis after merging is done
+
+    script:
+    """
+    # split combined cohort file into per-tumour files:
+    tumour_results=${params.output_dir}/tumour_results
+    mkdir -p \${tumour_results}
+    python3 ${params.script_dir}/split_cohort_to_tumours.py \
+        --combined_file ${params.outputs_dir}/merged/all_tumours_combined.csv \
+        --tumour_results \${tumour_results}
+
+    for tumour_dir in "\$tumour_results"/*; do
+        tumour_id=\$(basename \${tumour_dir})
+        input_tumour_directory=${params.input_dir}/\${tumour_id}
+        # get cn change to ancestor:
+        alpaca ancestor-delta \
+            --output_directory "\${tumour_dir}" \
+            --tumour_df_path "\${tumour_dir}/ALPACA_output_\${tumour_id}.csv" \
+            --tree_path "\${input_tumour_directory}/tree_paths.json"
+
+        # calculate clone copy number diversity:
+        alpaca ccd \
+            --output_directory "\${tumour_dir}" \
+            --alpaca_output_path "\${tumour_dir}/ALPACA_output_\${tumour_id}.csv"
+    done
+    
+    # combine CCD tables into a single cohort-level table:
+    mkdir -p ${params.output_dir}/cohort_results
+    python3 ${params.script_dir}/combine_ccd_results.py \
+        --tumour_results_dir "\$tumour_results" \
+        --output_path "${params.output_dir}/cohort_results/cohort_ccd_results.csv"
+
+    echo done > analysis_done.token
+    """
+    output:
+    file 'analysis_done.token'
+
 }
