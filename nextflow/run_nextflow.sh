@@ -20,35 +20,34 @@ POOL_DIR="$ALPACA_WORK/pool"
 IN_PROGRESS_DIR="$ALPACA_WORK/in_progress"
 DONE_DIR="$ALPACA_WORK/done"
 FAILED_DIR="$ALPACA_WORK/failed"
-OUTPUTS_DIR="$ALPACA_WORK/outputs"
+WORK_OUTPUTS_DIR="$ALPACA_WORK/outputs"
+SCRIPT_DIR="scripts"
 
-mkdir -p "$ALPACA_WORK" "$POOL_DIR" "$IN_PROGRESS_DIR" "$DONE_DIR" "$FAILED_DIR" "$OUTPUTS_DIR" "$NFX_REPORTS"
+mkdir -p "$ALPACA_WORK" "$POOL_DIR" "$IN_PROGRESS_DIR" "$DONE_DIR" "$FAILED_DIR" "$WORK_OUTPUTS_DIR" "$NFX_REPORTS"
 
 SCRIPT_DIR="$(realpath "${SCRIPT_DIR:-$REPO_ROOT}")"
 
-POOL_DIR="$(realpath "${POOL_DIR:-$REPO_ROOT/dev/multi-tumour/pool}")"
-IN_PROGRESS_DIR="$(realpath "${IN_PROGRESS_DIR:-$REPO_ROOT/dev/multi-tumour/in_progress}")"
-DONE_DIR="$(realpath "${DONE_DIR:-$REPO_ROOT/dev/multi-tumour/done}")"
-FAILED_DIR="$(realpath "${FAILED_DIR:-$REPO_ROOT/dev/multi-tumour/failed}")"
-OUTPUTS_DIR="$(realpath "${OUTPUTS_DIR:-$REPO_ROOT/dev/multi-tumour/outputs}")"
-COHORT_DIR="$(realpath "${COHORT_DIR:-$REPO_ROOT/dev/multi-tumour/cohort}")"
-INPUT_DIR="$(realpath "${INPUT_DIR:-${COHORT_DIR}/input}")"
-OUTPUT_DIR="$(realpath "${OUTPUT_DIR:-${COHORT_DIR}/output}")"
-ALPACA_WORK="$(realpath "${ALPACA_WORK:-$REPO_ROOT/dev/alpaca-work}")"
-NFX_REPORTS="$(realpath "${NFX_REPORTS:-$REPO_ROOT/nextflow/reports}")"
+POOL_DIR="$(realpath "${POOL_DIR}")"
+IN_PROGRESS_DIR="$(realpath "${IN_PROGRESS_DIR}")"
+DONE_DIR="$(realpath "${DONE_DIR}")"
+FAILED_DIR="$(realpath "${FAILED_DIR}")"
+WORK_OUTPUTS_DIR="$(realpath "${WORK_OUTPUTS_DIR}")"
+INPUT_DIR="$(realpath "${INPUT_DIR}")"
+OUTPUT_DIR="$(realpath "${OUTPUT_DIR}")"
+ALPACA_WORK="$(realpath "${ALPACA_WORK}")"
+NFX_REPORTS="$(realpath "${NFX_REPORTS}")"
 
 # build args from env settings
 timestamp=$(date +%Y%m%d_%H%M%S)
 NXF_ARGS=( run main.nf -profile "${ENV_PROFILE:-local}" )
 NXF_ARGS+=( --alpaca_work_dir "${ALPACA_WORK}" )
 NXF_ARGS+=( --pool_dir "${POOL_DIR}" )
-NXF_ARGS+=( --cohort_dir "${COHORT_DIR}" )
 NXF_ARGS+=( --input_dir "${INPUT_DIR}" )
 NXF_ARGS+=( --output_dir "${OUTPUT_DIR}" )
 NXF_ARGS+=( --in_progress_dir "${IN_PROGRESS_DIR}" )
 NXF_ARGS+=( --done_dir "${DONE_DIR}" )
 NXF_ARGS+=( --failed_dir "${FAILED_DIR}" )
-NXF_ARGS+=( --outputs_dir "${OUTPUTS_DIR}" )
+NXF_ARGS+=( --outputs_dir "${WORK_OUTPUTS_DIR}" )
 NXF_ARGS+=( --script_dir "${SCRIPT_DIR}" )
 NXF_ARGS+=( --workers "${WORKERS:-4}" )
 NXF_ARGS+=( --cpus "${CPUS:-1}" )

@@ -43,7 +43,6 @@ process workerTask {
     script:
     """
         python3 ${params.script_dir}/segment_worker.py \
-            --cohort_dir ${params.cohort_dir} \
             --input_dir ${params.input_dir} \
             --in-progress-dir ${params.in_progress_dir} \
             --worker-id ${worker_id} \
@@ -104,7 +103,6 @@ process preparePool {
     script:
     """
     python3 ${params.script_dir}/create_symlink_pool.py \
-        --cohort_dir ${params.cohort_dir} \
         --input_dir ${params.input_dir} \
         --pool_dir ${params.pool_dir}
         mkdir -p ${params.outputs_dir}
@@ -159,7 +157,7 @@ process mergeSegments {
     python ${params.script_dir}/merge_segments.py \
             --segments-dir ${params.outputs_dir}/segment_outputs \
             --out ${params.outputs_dir}/merged/all_tumours_combined.csv \
-            --input-dir ${params.cohort_dir}/input
+            --input-dir ${params.input_dir}
 
     """
 }
