@@ -70,6 +70,7 @@ def main():
         default=None,
         help="Optional worker id used to create worker-specific in_progress subdir",
     )
+    p.add_argument("--done-dir", required=True)
     p.add_argument("--failed-dir", required=True)
     p.add_argument("--outputs-dir", required=True)
     p.add_argument("--cpus", default=1, type=int)
@@ -104,6 +105,7 @@ def main():
     args.worker_in_progress = worker_in_progress
 
     os.makedirs(args.in_progress_dir, exist_ok=True)
+    os.makedirs(args.done_dir, exist_ok=True)
     os.makedirs(args.failed_dir, exist_ok=True)
     os.makedirs(args.outputs_dir, exist_ok=True)
     # ensure subdirs for segment outputs and worker logs
