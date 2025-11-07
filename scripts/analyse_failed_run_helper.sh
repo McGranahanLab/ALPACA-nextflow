@@ -40,7 +40,6 @@ fi
 # set accordingly:
 ex=$exip
 # find responsible worker:
-ex=/camp/home/pawlikp/CN-CCF/tracerx800/nf_pipelines/primary/snp_filt_0_cn_rec_NU_F_U_F/alpaca-work/in_progress/worker_107/in_progress/ALPACA_input_table_LTX0394-Tumour1_12_40499361_53242439.csv
 # find worker directory by 'worker_' pattern:
 worker=$(echo $ex | grep -oE 'worker_[0-9]+' | head -n 1)
 
