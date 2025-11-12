@@ -101,38 +101,29 @@ process preparePool {
 
     script:
     """
+    mkdir -p ${params.outputs_dir}
+
+    # If restart requested, clear tokens and remove failed/in_progress before building pool
+    if [ "${params.restart}" = "1" ]; then
+        echo "Restart requested: clearing dispatcher and worker tokens and removing failed/in_progress directories"
+        rm -f ${params.outputs_dir}/dispatcher.done || true
+        rm -f ${params.outputs_dir}/worker_*.done || true
+        # optional: archive old failed/in_progress (skipped here for speed)
+        rm -rf ${params.failed_dir} || true
+        rm -rf ${params.in_progress_dir} || true
+        mkdir -p ${params.failed_dir} ${params.in_progress_dir}
+    fi
+
+    # Create the pool but skip files already present in done_dir to avoid reprocessing
     python3 ${params.script_dir}/create_symlink_pool.py \
         --input_dir ${params.input_dir} \
+        --done_dir ${params.done_dir} \
         --pool_dir ${params.pool_dir}
-        mkdir -p ${params.outputs_dir}
-        if [ "${params.restart}" = "1" ]; then
-            echo "Restart requested: clearing dispatcher and worker tokens and removing failed/in_progress directories"
-            # remove dispatcher token if present
-            rm -f ${params.outputs_dir}/dispatcher.done || true
-            # remove per-worker tokens in outputs dir
-            rm -f ${params.outputs_dir}/worker_*.done || true
-            # remove failed dir contents and in_progress subdirs so pool is recreated from input
-            rm -rf ${params.failed_dir} || true
-            rm -rf ${params.in_progress_dir} || true
-            mkdir -p ${params.failed_dir} ${params.in_progress_dir}
-        fi
 
-        # Remove any pool entries already present in done_dir to avoid reprocessing
-        if [ -d "${params.done_dir}" ]; then
-            for ppath in "${params.pool_dir}"/*; do
-                [ -e "\$ppath" ] || continue
-                bn=\$(basename "\$ppath")
-                # search done_dir recursively for a matching basename
-                if find "${params.done_dir}" -type l -name "\$bn" -print -quit | grep -q .; then
-                    rm -f "\$ppath" || true
-                fi
-            done || true
-        fi
-
-        # create the list of segments the workers should process
-        ls -1 ${params.pool_dir} | sort > segments_to_process.txt
-        echo ready > pool_ready.done
-        echo ready > ${params.outputs_dir}/pool_ready.done
+    # create the list of segments the workers should process
+    ls -1 ${params.pool_dir} | sort > segments_to_process.txt
+    echo ready > pool_ready.done
+    echo ready > ${params.outputs_dir}/pool_ready.done
     """
 
 }

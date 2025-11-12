@@ -36,8 +36,16 @@ def split_to_segments(tumour_dir: str) -> list[str]:
 
 
 p = argparse.ArgumentParser()
-p.add_argument("--input_dir", required=False,)
+p.add_argument(
+    "--input_dir",
+    required=False,
+)
 p.add_argument("--pool_dir", required=True)
+p.add_argument(
+    "--done_dir",
+    required=False,
+    help="Optional path to done directory to skip already-processed basenames",
+)
 p.add_argument(
     "--tumours",
     required=False,
@@ -48,6 +56,7 @@ args = p.parse_args()
 
 input_dir = Path(args.input_dir)
 pool_dir = Path(args.pool_dir)
+done_dir = Path(args.done_dir) if args.done_dir else None
 if args.tumours:
     tumours_filter = set([t.strip() for t in args.tumours.split(",") if t.strip()])
 else:
@@ -60,6 +69,12 @@ pool_dir.mkdir(parents=True, exist_ok=True)
 
 
 count = 0
+skipped = 0
+done_basenames = set()
+if done_dir and done_dir.exists():
+    for root, _, files in os.walk(str(done_dir)):
+        for fn in files:
+            done_basenames.add(fn)
 for tumour_entry in input_dir.iterdir():
     if not tumour_entry.is_dir():
         continue
@@ -77,6 +92,10 @@ for tumour_entry in input_dir.iterdir():
         src = Path(src_path)
         # sanitize filename: ensure no whitespaces or newlines
         f = src.name.strip()
+        # skip if already present in done_dir (by basename)
+        if f in done_basenames:
+            skipped += 1
+            continue
         dst = pool_dir / f
         try:
             if dst.exists() or dst.is_symlink():
@@ -85,5 +104,4 @@ for tumour_entry in input_dir.iterdir():
             count += 1
         except Exception as e:
             print(f"Warning: failed to create symlink for {src}: {e}")
-
-print(f"Created {count} symlinks in pool: {pool_dir}")
+print(f"Created {count} symlinks in pool: {pool_dir} (skipped {skipped} already-done)")
