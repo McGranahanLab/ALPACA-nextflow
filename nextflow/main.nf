@@ -201,11 +201,13 @@ process summariseReports {
     cp ci_modified_report.csv ${params.outputs_dir}/reports/ci_modified_report.csv || true
     cp monoclonal_samples_report.csv ${params.outputs_dir}/reports/monoclonal_samples_report.csv || true
     cp elbow_increase_report.csv ${params.outputs_dir}/reports/elbow_increase_report.csv || true
+    cp run_summary.csv ${params.outputs_dir}/reports/run_summary.csv || true
     # copy to user-specified output directory
     mkdir -p ${params.output_dir}/reports
     cp ci_modified_report.csv ${params.output_dir}/reports/ci_modified_report.csv || true
     cp monoclonal_samples_report.csv ${params.output_dir}/reports/monoclonal_samples_report.csv || true
     cp elbow_increase_report.csv ${params.output_dir}/reports/elbow_increase_report.csv || true
+    cp run_summary.csv ${params.output_dir}/reports/run_summary.csv || true
     """
 }
 

@@ -20,9 +20,16 @@ def main():
             continue
         if 'report' in f:
             continue
+        if 'summary' in f:
+            continue
         df = pd.read_csv(os.path.join(args.segments_dir, f))
         seg_dfs.append(df)
     final = pd.concat(seg_dfs, ignore_index=True)
+    # check if there are non NaN values in 'pred_CN_A' and 'pred_CN_B' columns
+    if final['pred_CN_A'].isna().any() or final['pred_CN_B'].isna().any():
+        nan_df = final[final['pred_CN_A'].isna() | final['pred_CN_B'].isna()]
+        nan_df_head = nan_df[['tumour_id', 'segment']].head(5)
+        raise ValueError(f"All values in 'pred_CN_A' or 'pred_CN_B' are NaN. Sample rows with NaN:\n{nan_df_head}")
     # before saving, ensure that all the expected segments are present
     segments_out = set(final['tumour_id'] + '_' + final['segment'].astype(str))
     input_dfs = []
