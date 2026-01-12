@@ -124,16 +124,16 @@ def process_elbow_increase_reports(dirpath, delete, outpath):
             print(f"Warning: failed to remove {fp}: {e}", file=sys.stderr)
 
 
-def process_run_summary_reports(dirpath, delete=False, outpath=None):
-    """Combine segment-level run_summary reports into a single file.
+def process_run_gap_summary_reports(dirpath, delete=False, outpath=None):
+    """Combine segment-level run_gap_summary reports into a single file.
     
     Only includes segments with non-zero gap (non-optimal solutions).
     Reports gap value and reason (time_limit, gap_tolerance, or other).
     """
-    pattern = os.path.join(dirpath, "*_run_summary.csv")
+    pattern = os.path.join(dirpath, "*_run_gap_summary.csv")
     files = sorted(glob.glob(pattern))
     if outpath is None:
-        outpath = "run_summary.csv"
+        outpath = "run_gap_summary.csv"
     
     # Concatenate all segment reports
     if not files:
@@ -187,7 +187,7 @@ def main():
     process_ci_reports(args.reports_dir, delete=args.delete, outpath=None)
     process_monoclonal_reports(args.reports_dir, delete=args.delete, outpath=None)
     process_elbow_increase_reports(args.reports_dir, delete=args.delete, outpath=None)
-    process_run_summary_reports(args.reports_dir, delete=args.delete, outpath=None)
+    process_run_gap_summary_reports(args.reports_dir, delete=args.delete, outpath=None)
 
 if __name__ == "__main__":
     main()
