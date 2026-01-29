@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run Nextflow with repository-local work/cache directories under nextflow/
-# Usage: ./nextflow/run_nextflow.sh [nextflow args]
+# Usage: ./nextflow/run_nextflow.sh pipeline.env
 
 set -euo pipefail
 

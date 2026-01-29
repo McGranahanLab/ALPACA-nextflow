@@ -271,6 +271,15 @@ process analysis {
         alpaca ccd \
             --output_directory "\${tumour_dir}" \
             --alpaca_output_path "\${tumour_dir}/ALPACA_output_\${tumour_id}.csv"
+        
+        # make plots: 
+        input_tumour_directory=${params.input_dir}/\${tumour_id}
+        alpaca plot-tumour \
+            --input_directory "\${input_tumour_directory}" \
+            --output_directory "\${tumour_dir}" \
+            --plot-output-mode notebook \
+            --heatmap-palette "magma" \
+            --genome-build hg19
     done
     
     # combine CCD tables into a single cohort-level table:
