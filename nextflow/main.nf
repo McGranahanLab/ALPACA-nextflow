@@ -143,9 +143,17 @@ process mergeSegments {
     """
     mkdir -p ${params.outputs_dir}/merged
     python ${params.script_dir}/merge_segments.py \
-            --segments-dir ${params.outputs_dir}/segment_outputs \
-            --out ${params.outputs_dir}/merged/all_tumours_combined.csv \
-            --input-dir ${params.input_dir}
+            --segments-dir "${params.outputs_dir}/segment_outputs" \
+            --out "${params.outputs_dir}/merged/all_tumours_combined.csv" \
+            --input-dir "${params.input_dir}" \
+            --output-dir "${params.output_dir}" \
+            --nextflow-log "${workflow.launchDir}/.nextflow.log" \
+            --work-dir "${workflow.workDir}" \
+            --workers ${params.workers} \
+            --worker-cpus ${params.cpus} \
+            --worker-label worker_high \
+            --profile-config "${params.profile_config ?: ''}" \
+            --profile-name "${params.env_profile ?: ''}"
 
     """
 }

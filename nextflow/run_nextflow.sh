@@ -62,6 +62,14 @@ NXF_ARGS+=( --max_idle_seconds "${MAX_IDLE_SECONDS:-600}" )
 NXF_ARGS+=( --delete_reports "${DELETE_REPORTS:-0}" )
 NXF_ARGS+=( --restart "${RESTART:-0}" )
 
+PROFILE_CONF_PATH="$REPO_ROOT/nextflow/${ENV_PROFILE:-local}.conf"
+if [ -f "$PROFILE_CONF_PATH" ]; then
+	NXF_ARGS+=( --profile_config "$PROFILE_CONF_PATH" )
+else
+	NXF_ARGS+=( --profile_config "" )
+fi
+NXF_ARGS+=( --env_profile "${ENV_PROFILE:-local}" )
+
 if [ -n "${ALPACA_ARGS:-}" ]; then
 	NXF_ARGS+=( "--alpaca_args=${ALPACA_ARGS}" )
 fi
