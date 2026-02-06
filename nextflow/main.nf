@@ -55,7 +55,7 @@ process workerTask {
             --segments-per-claim ${params.segments_per_claim} \
             --max-idle-seconds ${params.max_idle_seconds} \
             --log-level ${params.worker_logs} \
-                --alpaca-args '${params.alpaca_args}'
+            --alpaca-args '${params.alpaca_args}'
     # emit a simple local done token file so the workflow knows this worker finished
     echo "DONE ${worker_id}" > worker_${worker_id}.done
     hostname >> worker_${worker_id}.done
@@ -285,9 +285,9 @@ process analysis {
         alpaca plot-tumour \
             --input_directory "\${input_tumour_directory}" \
             --output_directory "\${tumour_dir}" \
-            --plot-output-mode notebook \
-            --heatmap-palette "magma" \
-            --genome-build hg19
+            --plot_output_mode notebook \
+            --heatmap_palette "magma" \
+            --genome_build hg19
     done
     
     # combine CCD tables into a single cohort-level table:
