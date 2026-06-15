@@ -14,6 +14,9 @@ PROCESS_RE = re.compile(
 )
 
 
+FULL_HASH_RE = re.compile(r"(?P<hash>[0-9a-f]{2}/[0-9a-f]{7,32})\b")
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--segments-dir", required=True)
@@ -112,6 +115,21 @@ def format_duration(seconds: Optional[float]) -> str:
     return f"{days}d {hours}h"
 
 
+def find_full_hash_in_log(log_path: str, hash_short: str) -> str:
+    if not log_path or not hash_short:
+        return hash_short
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                if hash_short in line:
+                    match = FULL_HASH_RE.search(line)
+                    if match:
+                        return match.group("hash")
+    except OSError:
+        return hash_short
+    return hash_short
+
+
 def parse_nextflow_log(log_path: str, process_name: str) -> List[Dict[str, str]]:
     entries: List[Dict[str, str]] = []
     if not log_path:
@@ -123,10 +141,14 @@ def parse_nextflow_log(log_path: str, process_name: str) -> List[Dict[str, str]]
                     continue
                 match = PROCESS_RE.search(line)
                 if match and match.group("name") == process_name:
+                    hash_short = match.group("hash")
+                    run_id = match.group("run")
+                    # find full hash in the file:
+                    full_hash = find_full_hash_in_log(log_path, hash_short)
                     entries.append(
                         {
-                            "hash": match.group("hash"),
-                            "run_id": match.group("run"),
+                            "hash": full_hash,
+                            "run_id": run_id,
                             "line": line.strip(),
                         }
                     )
@@ -252,6 +274,7 @@ def generate_failure_report(
     lines.append("")
 
     summary = context.get("worker_summary", {})
+    breakpoint()
     if summary:
         lines.append("Worker execution summary:")
         lines.append(f"- Workers observed: {summary.get('total', 0)}")
@@ -295,7 +318,7 @@ def generate_failure_report(
 
 def main():
     args = parse_args()
-
+    breakpoint()
     seg_dfs: List[pd.DataFrame] = []
     for file_name in os.listdir(args.segments_dir):
         if not file_name.endswith(".csv"):
