@@ -274,7 +274,6 @@ def generate_failure_report(
     lines.append("")
 
     summary = context.get("worker_summary", {})
-    breakpoint()
     if summary:
         lines.append("Worker execution summary:")
         lines.append(f"- Workers observed: {summary.get('total', 0)}")
@@ -318,7 +317,6 @@ def generate_failure_report(
 
 def main():
     args = parse_args()
-    breakpoint()
     seg_dfs: List[pd.DataFrame] = []
     for file_name in os.listdir(args.segments_dir):
         if not file_name.endswith(".csv"):
