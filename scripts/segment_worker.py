@@ -11,6 +11,26 @@ import json
 import socket
 from datetime import datetime
 import shlex
+import csv
+
+
+def get_tumour_id_from_seg_file(file_path):
+    with open(file_path, mode='r', newline='', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        for i, row in enumerate(reader):
+            if i == 0:
+                if row[0]=="tumour_id":
+                    j=0
+                    continue
+                else:
+                    for j in range(len(row)):
+                        if row[j]=="tumour_id":
+                            break
+                    else:
+                        raise ValueError(f"tumour_id column not found in {file_path}")
+            if i == 1:
+                return row[j]
+    return None
 
 
 def run_alpaca_on_segment(claimed_paths, args):
@@ -24,8 +44,7 @@ def run_alpaca_on_segment(claimed_paths, args):
 
     # All paths are expected to be in the worker_in_progress dir; use basenames for --input_files
     basenames = [os.path.basename(p) for p in claimed_paths]
-    first = basenames[0]
-    tumour = first.replace("ALPACA_input_table_", "").split("_", 1)[0]
+    tumour = get_tumour_id_from_seg_file(claimed_paths[0])
     tumour_cohort_dir = os.path.join(args.input_dir, tumour)
     tumour_in_progress = os.path.join(args.worker_in_progress, 'in_progress')
     segment_solution_output_dir = os.path.join(args.outputs_dir, "segment_outputs")
@@ -129,7 +148,7 @@ def main():
         "start_time": datetime.now().isoformat() + "Z",
         "pool_snapshots": [],  # list of {ts, files}
         "claims": [],  # list of {ts, basename, claimed_path}
-        "alapaca_runs": [],  # list of {ts, tumour, input_files, returncode, success, stdout_snip, stderr_snip}
+        "alpaca_runs": [],  # list of {ts, tumour, input_files, returncode, success, stdout_snip, stderr_snip}
         "moves": [],  # list of {ts, basename, src, dest, result}
     }
     # Record the provided path params
@@ -299,7 +318,7 @@ def main():
                 try:
                     res = run_alpaca_on_segment(paths, args)
                     # record ALPACA invocation result
-                    worker_log["alapaca_runs"].append(
+                    worker_log["alpaca_runs"].append(
                         {
                             "ts": datetime.now().isoformat() + "Z",
                             "tumour": tumour,
