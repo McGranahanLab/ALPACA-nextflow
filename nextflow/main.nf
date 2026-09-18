@@ -5,6 +5,7 @@
 // Print params to the console at pipeline startup
 println "=== Pipeline params ==="
 params.sort().each { k, v -> println "${k} = ${v}" }
+def use_container = params.use_container in [true, 1, '1', 'true', 'TRUE', 'yes', 'YES', 'on', 'ON']
 workflow {
     // Prepare the lightweight symlink pool once before starting workers - workers will claimed unsolved segments from here
     def pool = preparePool()
@@ -32,7 +33,7 @@ workflow {
 
 
 process workerTask {
-    conda params.conda_env
+    container use_container ? params.alpaca_container : null
     label 'worker_high'
     tag "$worker_id"
     cpus params.cpus
@@ -67,7 +68,7 @@ process workerTask {
 
 
 process runDispatcher {
-    conda params.conda_env
+    container use_container ? params.alpaca_container : null
     label 'worker_high'
     tag 'dispatcher'
 
@@ -92,7 +93,7 @@ process runDispatcher {
 
 
 process preparePool {
-    conda params.conda_env
+    container use_container ? params.alpaca_container : null
     label 'low'
     tag 'preparePool'
 
@@ -129,7 +130,7 @@ process preparePool {
 }
 
 process mergeSegments {
-    conda params.conda_env
+    container use_container ? params.alpaca_container : null
     label 'low'
     tag 'mergeSegments'
 
@@ -161,7 +162,7 @@ process mergeSegments {
 
 
 process validateResults {
-    conda params.conda_env
+    container use_container ? params.alpaca_container : null
     label 'low'
     tag 'validateResults'
 
@@ -191,7 +192,7 @@ process validateResults {
 }
 
 process summariseReports {
-    conda params.conda_env
+    container use_container ? params.alpaca_container : null
     label 'low'
     tag 'summariseReports'
 
@@ -220,7 +221,7 @@ process summariseReports {
 }
 
 process cleanup {
-    conda params.conda_env
+    container use_container ? params.alpaca_container : null
     label 'low'
     tag 'cleanup'
 
@@ -250,7 +251,7 @@ process cleanup {
 }
 
 process analysis {
-    conda params.conda_env
+    container use_container ? params.alpaca_container : null
     label 'low'
     tag 'analysis'
 

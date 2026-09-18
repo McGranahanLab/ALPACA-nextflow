@@ -12,12 +12,13 @@ ALPACA-nextflow wraps the ALPACA copy-number inference toolkit in a fault-tolera
 
 ## Requirements
 - Nextflow 23.10+ with Java 11 or newer.
-- Python 3.9+ with pandas plus the ALPACA Python package available on $PATH or within the specified conda env.
+- Python 3.9+ with pandas plus the ALPACA Python package available on $PATH (for host execution).
+- Singularity/Apptainer if using containerised execution.
 - SLURM cluster if using the `slurm` profile (otherwise the default `local` executor suffices).
 
 ## Quickstart
 1. Create/edit `nextflow/pipeline.env` with paths that exist in your environment. The example values point to `../ALPACA-model/tests/...` and must be updated for real runs.
-2. Prepare aand activate conda env that includes ALPACA.
+2. Choose execution mode: host execution (`USE_CONTAINER=0`) or Singularity (`USE_CONTAINER=1`).
 3. Launch the pipeline from the repo root:
 
 ```bash
@@ -35,7 +36,8 @@ Pass additional Nextflow flags after the env file, e.g. `./nextflow/run_nextflow
 | `ALPACA_WORK` | Scratch workspace that stores pool, in-progress, done, failed, and worker outputs. Safe to delete between runs (unless debugging). |
 | `NFX_REPORTS` | Folder for Nextflow HTML run reports (under `nextflow/` by default). |
 | `ENV_PROFILE` | Nextflow profile (`local` or `slurm`). Profiles extend `nextflow/nextflow.config` and optionally `slurm.conf`. |
-| `CONDA_ENV` | Path to a conda environment (YAML or `.env`) used by all processes. Leave empty to skip conda. |
+| `USE_CONTAINER` | Set to `1` to run all processes in Singularity, or `0` to run on the host environment. |
+| `ALPACA_CONTAINER` | Container image used when `USE_CONTAINER=1` (default `docker://wlippa/alpaca:1.0`). |
 | `WORKERS` / `CPUS` | Number of concurrent workers and ALPACA threads per worker. Workers map to separate Nextflow processes; adjust HPC queue requests accordingly. |
 | `SEGMENTS_PER_CLAIM` | How many segment CSVs each worker requests per ALPACA invocation (batching reduces overhead). |
 | `MAX_IDLE_SECONDS` | Worker exit timeout when no new queue entries arrive. |
