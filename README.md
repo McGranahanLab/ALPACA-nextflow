@@ -38,6 +38,7 @@ Pass additional Nextflow flags after the env file, e.g. `./nextflow/run_nextflow
 | `ENV_PROFILE` | Nextflow profile (`local` or `slurm`). Profiles extend `nextflow/nextflow.config` and optionally `slurm.conf`. |
 | `USE_CONTAINER` | Set to `1` to run all processes in Singularity, or `0` to run on the host environment. |
 | `ALPACA_CONTAINER` | Container image used when `USE_CONTAINER=1` (default `docker://wlippa/alpaca:1.0`). |
+| `GUROBI_LICENSE_FILE` | Absolute host path to a Gurobi token/license file. When set, Nextflow adds Singularity `--bind` and `--env GRB_LICENSE_FILE=...` options automatically. |
 | `WORKERS` / `CPUS` | Number of concurrent workers and ALPACA threads per worker. Workers map to separate Nextflow processes; adjust HPC queue requests accordingly. |
 | `SEGMENTS_PER_CLAIM` | How many segment CSVs each worker requests per ALPACA invocation (batching reduces overhead). |
 | `MAX_IDLE_SECONDS` | Worker exit timeout when no new queue entries arrive. |
