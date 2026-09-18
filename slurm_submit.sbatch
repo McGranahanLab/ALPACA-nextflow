@@ -11,4 +11,5 @@
 # Absolute path to the directory containing this sbatch file.
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
 ml Nextflow
+ml Singularity/3.6.4
 bash "$REPO_ROOT/nextflow/run_nextflow.sh" "$REPO_ROOT/pipeline.env"
