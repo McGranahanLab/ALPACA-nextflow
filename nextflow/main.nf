@@ -45,7 +45,7 @@ process workerTask {
 
     script:
     """
-        python3 ${params.script_dir}/segment_worker.py \
+        python ${params.script_dir}/segment_worker.py \
             --input_dir ${params.input_dir} \
             --in-progress-dir ${params.in_progress_dir} \
             --worker-id ${worker_id} \
@@ -80,7 +80,7 @@ process runDispatcher {
 
     script:
     """
-    python3 ${params.script_dir}/dispatcher.py \
+    python ${params.script_dir}/dispatcher.py \
         --pool-dir ${params.pool_dir} \
         --in-progress-dir ${params.in_progress_dir} \
         --workers ${params.workers} \
@@ -106,17 +106,16 @@ process preparePool {
 
     # If restart requested, clear tokens and remove failed/in_progress before building pool
     if [ "${params.restart}" = "1" ]; then
-        echo "Restart requested: clearing dispatcher and worker tokens and removing failed/in_progress directories"
+        echo "Restart requested: clearing dispatcher and worker tokens and cleaning failed/in_progress directories"
         rm -f ${params.outputs_dir}/dispatcher.done || true
         rm -f ${params.outputs_dir}/worker_*.done || true
-        # optional: archive old failed/in_progress (skipped here for speed)
-        rm -rf ${params.failed_dir} || true
-        rm -rf ${params.in_progress_dir} || true
         mkdir -p ${params.failed_dir} ${params.in_progress_dir}
+        find ${params.failed_dir} -mindepth 1 -maxdepth 1 -exec rm -rf {} + || true
+        find ${params.in_progress_dir} -mindepth 1 -maxdepth 1 -exec rm -rf {} + || true
     fi
 
     # Create the pool but skip files already present in done_dir to avoid reprocessing
-    python3 ${params.script_dir}/create_symlink_pool.py \
+    python ${params.script_dir}/create_symlink_pool.py \
         --input_dir ${params.input_dir} \
         --done_dir ${params.done_dir} \
         --pool_dir ${params.pool_dir}
@@ -263,7 +262,7 @@ process analysis {
     # split combined cohort file into per-tumour files:
     tumour_results=${params.output_dir}/tumour_results
     mkdir -p \${tumour_results}
-    python3 ${params.script_dir}/split_cohort_to_tumours.py \
+    python ${params.script_dir}/split_cohort_to_tumours.py \
         --combined_file ${params.outputs_dir}/merged/all_tumours_combined.csv \
         --tumour_results \${tumour_results}
 
@@ -293,7 +292,7 @@ process analysis {
     
     # combine CCD tables into a single cohort-level table:
     mkdir -p ${params.output_dir}/cohort_results
-    python3 ${params.script_dir}/combine_ccd_results.py \
+    python ${params.script_dir}/combine_ccd_results.py \
         --tumour_results_dir "\$tumour_results" \
         --output_path "${params.output_dir}/cohort_results/cohort_ccd_results.csv"
 

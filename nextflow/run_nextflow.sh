@@ -1,19 +1,60 @@
 #!/usr/bin/env bash
 # Run Nextflow with repository-local work/cache directories under nextflow/
-# Usage: ./nextflow/run_nextflow.sh pipeline.env
+# Usage: ./nextflow/run_nextflow.sh [config-path] [extra nextflow args...]
 
 set -euo pipefail
 
-RUN_CONFIG=$1
+RUN_CONFIG="${1:-}"
+
+if [[ -z "$RUN_CONFIG" ]]; then
+	echo "Usage: $0 [config-path] [extra nextflow args...]" >&2
+	exit 2
+fi
 
 THIS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
 REPO_ROOT="$(cd "$THIS_SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P)"
-cd $REPO_ROOT || exit 1
-# load user config if present
-if [ -f "$REPO_ROOT/nextflow/$RUN_CONFIG" ]; then
-	# shellcheck disable=SC1090
-	source "$REPO_ROOT/nextflow/$RUN_CONFIG"
+cd "$REPO_ROOT" || exit 1
+
+# Resolve config path:
+# - absolute path
+# - path relative to current repo root
+# - bare filename under nextflow/
+if [[ -f "$RUN_CONFIG" ]]; then
+	RUN_CONFIG_PATH="$(realpath "$RUN_CONFIG")"
+elif [[ -f "$REPO_ROOT/$RUN_CONFIG" ]]; then
+	RUN_CONFIG_PATH="$(realpath "$REPO_ROOT/$RUN_CONFIG")"
+elif [[ -f "$REPO_ROOT/nextflow/$RUN_CONFIG" ]]; then
+	RUN_CONFIG_PATH="$(realpath "$REPO_ROOT/nextflow/$RUN_CONFIG")"
+else
+	echo "Config file not found: $RUN_CONFIG" >&2
+	exit 2
 fi
+
+# shellcheck disable=SC1090
+source "$RUN_CONFIG_PATH"
+
+# Normalize Gurobi license path for container bind/use.
+if [[ -n "${GUROBI_LICENSE_FILE:-}" ]]; then
+	case "$GUROBI_LICENSE_FILE" in
+		~/*)
+			GUROBI_LICENSE_FILE="$HOME/${GUROBI_LICENSE_FILE#~/}"
+			;;
+	esac
+
+	if [[ ! -f "$GUROBI_LICENSE_FILE" ]]; then
+		echo "Gurobi license file not found: $GUROBI_LICENSE_FILE" >&2
+		exit 2
+	fi
+
+	GUROBI_LICENSE_FILE="$(realpath "$GUROBI_LICENSE_FILE")"
+fi
+
+for required_var in ALPACA_WORK INPUT_DIR OUTPUT_DIR NFX_REPORTS; do
+	if [[ -z "${!required_var:-}" ]]; then
+		echo "Required variable '$required_var' is missing in $RUN_CONFIG_PATH" >&2
+		exit 2
+	fi
+done
 
 # Pool and intermediate directories (relative to repo root or absolute)
 POOL_DIR="$ALPACA_WORK/pool"
@@ -77,14 +118,14 @@ if [ -n "${ALPACA_ARGS:-}" ]; then
 fi
 
 
-for a in "$@"; do
+for a in "${@:2}"; do
 	NXF_ARGS+=( "$a" )
 done
 
 echo executing nextflow "${NXF_ARGS[@]}"
 # persist configuration used for this run
 mkdir -p "$OUTPUT_DIR/reports"
-cp "$REPO_ROOT/nextflow/$RUN_CONFIG" "$OUTPUT_DIR/reports/used_config_${timestamp}.env"
+cp "$RUN_CONFIG_PATH" "$OUTPUT_DIR/reports/used_config_${timestamp}.env"
 
 pushd "$REPO_ROOT/nextflow" >/dev/null
 nextflow "${NXF_ARGS[@]}"
