@@ -155,6 +155,12 @@ process mergeSegments {
             --profile-config "${params.profile_config ?: ''}" \
             --profile-name "${params.env_profile ?: ''}"
 
+    # If ALPACA was run with --output_all_solutions, promote the per-segment
+    # all_solutions/ tree from the scratch work-dir to the user's output-dir
+    # before cleanup deletes it. No-op when the flag wasn't used.
+    python ${params.script_dir}/promote_all_solutions.py \
+            --segments-dir "${params.outputs_dir}/segment_outputs" \
+            --output-dir "${params.output_dir}"
     """
 }
 
