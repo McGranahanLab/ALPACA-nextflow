@@ -15,22 +15,66 @@ import csv
 
 
 def get_tumour_id_from_seg_file(file_path):
-    with open(file_path, mode='r', newline='', encoding='utf-8') as f:
+    with open(file_path, mode="r", newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
         for i, row in enumerate(reader):
             if i == 0:
-                if row[0]=="tumour_id":
-                    j=0
+                if row[0] == "tumour_id":
+                    j = 0
                     continue
                 else:
                     for j in range(len(row)):
-                        if row[j]=="tumour_id":
+                        if row[j] == "tumour_id":
                             break
                     else:
                         raise ValueError(f"tumour_id column not found in {file_path}")
             if i == 1:
                 return row[j]
     return None
+
+
+def reorganize_all_solutions(segment_solution_output_dir, tumour, basenames):
+    """
+    ALPACA writes --output_all_solutions files to a flat
+    all_solutions/<segment>/ directory shared by every tumour. Since different
+    tumours can share the same segment id, move this run's files into
+    all_solutions/<tumour>/<segment>/ so outputs from different tumours never
+    land in the same folder.
+    """
+    all_solutions_root = os.path.join(segment_solution_output_dir, "all_solutions")
+    if not os.path.isdir(all_solutions_root):
+        return
+    for bn in basenames:
+        segment = bn.replace("ALPACA_input_table_", "")
+        if segment.startswith(f"{tumour}_"):
+            segment = segment[len(tumour) + 1 :]
+        segment = segment[: -len(".csv")] if segment.endswith(".csv") else segment
+        src_dir = os.path.join(all_solutions_root, segment)
+        if not os.path.isdir(src_dir):
+            continue
+        expected_names = {
+            f"all_{tumour}_{segment}.csv",
+            f"all_max_{tumour}_{segment}.csv",
+            f"{tumour}_{segment}_elbow_table.csv",
+            f"{tumour}_{segment}_elbow_plot.png",
+        }
+        dst_dir = os.path.join(all_solutions_root, tumour, segment)
+        for fname in os.listdir(src_dir):
+            if fname not in expected_names:
+                continue
+            os.makedirs(dst_dir, exist_ok=True)
+            try:
+                shutil.move(os.path.join(src_dir, fname), os.path.join(dst_dir, fname))
+            except OSError as e:
+                print(
+                    f"Warning: failed to move all_solutions file {fname}: {e}",
+                    file=sys.stderr,
+                )
+        try:
+            if not os.listdir(src_dir):
+                os.rmdir(src_dir)
+        except OSError:
+            pass
 
 
 def run_alpaca_on_segment(claimed_paths, args):
@@ -46,9 +90,9 @@ def run_alpaca_on_segment(claimed_paths, args):
     basenames = [os.path.basename(p) for p in claimed_paths]
     tumour = get_tumour_id_from_seg_file(claimed_paths[0])
     tumour_cohort_dir = os.path.join(args.input_dir, tumour)
-    tumour_in_progress = os.path.join(args.worker_in_progress, 'in_progress')
+    tumour_in_progress = os.path.join(args.worker_in_progress, "in_progress")
     segment_solution_output_dir = os.path.join(args.outputs_dir, "segment_outputs")
-    
+
     cmd = [
         sys.executable,
         "-m",
@@ -76,6 +120,7 @@ def run_alpaca_on_segment(claimed_paths, args):
         cmd += extra
     print("Running:", " ".join(cmd))
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    reorganize_all_solutions(segment_solution_output_dir, tumour, basenames)
     return res
 
 
@@ -118,8 +163,7 @@ def main():
 
     args = p.parse_args()
     # create a per-worker in_progress directory to avoid cross-worker races
-    worker_in_progress = os.path.join(
-            args.in_progress_dir, f"worker_{args.worker_id}")
+    worker_in_progress = os.path.join(args.in_progress_dir, f"worker_{args.worker_id}")
     # expose the per-worker in_progress dir as the working in_progress dir
     args.worker_in_progress = worker_in_progress
 
@@ -272,7 +316,9 @@ def main():
                 worker_log["last_work_ts"] = time.time()
             idle_seconds = time.time() - worker_log.get("last_work_ts", time.time())
             # exit if idle time is too long or if nothing else is left to claim and worker confirms that dispatcher exited
-            dispatcher_done_path = os.path.exists(os.path.join(args.outputs_dir, "dispatcher.done"))
+            dispatcher_done_path = os.path.exists(
+                os.path.join(args.outputs_dir, "dispatcher.done")
+            )
             timeout_reached = idle_seconds > args.max_idle_seconds
             if timeout_reached or dispatcher_done_path:
                 try:

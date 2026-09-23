@@ -4,7 +4,9 @@
 Workers write per-segment optimal solutions to
 `${outputs_dir}/segment_outputs/`, and when ALPACA is run with
 `--output_all_solutions` it additionally writes to
-`${outputs_dir}/segment_outputs/all_solutions/<segment>/`:
+`${outputs_dir}/segment_outputs/all_solutions/<tumour>/<segment>/`
+(the worker moves ALPACA's raw per-segment output there to avoid different
+tumours colliding on a shared segment id):
 
     all_<tumour>_<segment>.csv          # candidate solutions (elbow search)
     all_max_<tumour>_<segment>.csv      # unconstrained max solution
@@ -27,41 +29,12 @@ The promoted layout is:
 from __future__ import annotations
 
 import argparse
-import glob
-import os
-import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, List
 
 import pandas as pd
-
-
-def parse_file_tumour_and_segment(path: Path) -> Tuple[str, str, str]:
-    stem = path.stem
-
-    if stem.endswith("_elbow_table"):
-        stem = stem[: -len("_elbow_table")]
-        tumour, segment = stem.split("_", 1)
-        return tumour, segment, "elbow_table"
-
-    if stem.endswith("_elbow_plot"):
-        stem = stem[: -len("_elbow_plot")]
-        tumour, segment = stem.split("_", 1)
-        return tumour, segment, "elbow_plot"
-
-    if stem.startswith("all_max_"):
-        suffix = stem[len("all_max_") :]
-        tumour, segment = suffix.split("_", 1)
-        return tumour, segment, "all_max"
-
-    if stem.startswith("all_"):
-        suffix = stem[len("all_") :]
-        tumour, segment = suffix.split("_", 1)
-        return tumour, segment, "all"
-
-    raise ValueError(f"Could not parse tumour/segment from file name: {path}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -107,31 +80,31 @@ def promote_all_solutions(segments_dir: Path | str, output_dir: Path | str) -> N
     dst.mkdir(parents=True, exist_ok=True)
 
     tumour_to_files: Dict[str, Dict[str, List[Path]]] = {}
-    for segment_dir in sorted(src.iterdir()):
-        if not segment_dir.is_dir():
+    for tumour_dir in sorted(src.iterdir()):
+        if not tumour_dir.is_dir():
             continue
-        for f in sorted(segment_dir.iterdir()):
-            if not f.is_file():
+        tumour = tumour_dir.name
+        tumour_bucket = tumour_to_files.setdefault(
+            tumour, {"all": [], "all_max": [], "elbow_table": [], "elbow_plot": []}
+        )
+        for segment_dir in sorted(tumour_dir.iterdir()):
+            if not segment_dir.is_dir():
                 continue
-            try:
-                tumour, segment, modality = parse_file_tumour_and_segment(f)
-            except ValueError:
-                continue
-            tumour_bucket = tumour_to_files.setdefault(
-                tumour, {"all": [], "all_max": [], "elbow_table": [], "elbow_plot": []}
-            )
-            if (
-                f.name.startswith("all_")
-                and f.suffix == ".csv"
-                and not f.name.startswith("all_max_")
-            ):
-                tumour_bucket["all"].append(f)
-            elif f.name.startswith("all_max_") and f.suffix == ".csv":
-                tumour_bucket["all_max"].append(f)
-            elif f.name.endswith("_elbow_table.csv"):
-                tumour_bucket["elbow_table"].append(f)
-            elif f.name.endswith("_elbow_plot.png"):
-                tumour_bucket["elbow_plot"].append(f)
+            for f in sorted(segment_dir.iterdir()):
+                if not f.is_file():
+                    continue
+                if (
+                    f.name.startswith("all_")
+                    and f.suffix == ".csv"
+                    and not f.name.startswith("all_max_")
+                ):
+                    tumour_bucket["all"].append(f)
+                elif f.name.startswith("all_max_") and f.suffix == ".csv":
+                    tumour_bucket["all_max"].append(f)
+                elif f.name.endswith("_elbow_table.csv"):
+                    tumour_bucket["elbow_table"].append(f)
+                elif f.name.endswith("_elbow_plot.png"):
+                    tumour_bucket["elbow_plot"].append(f)
 
     for tumour, groups in sorted(tumour_to_files.items()):
         tumour_dir = dst / tumour

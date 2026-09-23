@@ -25,7 +25,7 @@ workflow {
     // validate results: collect the prepared segments list (pool.out) and merged segments list (merge.out) and compare
     def expected_ch = pool.collect()
     def actual_ch = merge.collect()
-    def (missing_ch, validation_token_ch) = validateResults(expected_ch, actual_ch)
+    def (missing_ch, validation_token_ch, all_solutions_report_ch) = validateResults(expected_ch, actual_ch)
     //missing_ch.subscribe { println "validation missing file: ${it}" }
     // run cleanup only if validation emits a done token
     cleanup(validation_token_ch,analysis_token)
@@ -182,11 +182,16 @@ process validateResults {
     output:
     file 'missing_segments.txt'
     file 'validation_done.token'
+    file 'all_solutions_validation_report.csv'
 
     script:
     """
     python ${params.script_dir}/validate_results.py \
-            ${expected_list} ${actual_list} || true
+            ${expected_list} ${actual_list} \
+            --input-dir "${params.input_dir}" \
+            --output-dir "${params.output_dir}" \
+            --restrict-tumours '${params.restrict_to_tumours ?: ''}' \
+            --restrict-segments '${params.restrict_to_segments ?: ''}' || true
 
 
     if [ ! -f missing_segments.txt ]; then
@@ -197,6 +202,13 @@ process validateResults {
     else
         echo done > validation_done.token
     fi
+    if [ ! -f all_solutions_validation_report.csv ]; then
+        echo "tumour_id,check,details" > all_solutions_validation_report.csv
+    fi
+    # copy alongside the other run reports
+    mkdir -p ${params.outputs_dir}/reports ${params.output_dir}/reports
+    cp all_solutions_validation_report.csv ${params.outputs_dir}/reports/all_solutions_validation_report.csv || true
+    cp all_solutions_validation_report.csv ${params.output_dir}/reports/all_solutions_validation_report.csv || true
     """
 }
 
