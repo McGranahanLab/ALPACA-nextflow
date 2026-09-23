@@ -155,7 +155,9 @@ process mergeSegments {
             --worker-cpus ${params.cpus} \
             --worker-label worker_high \
             --profile-config "${params.profile_config ?: ''}" \
-            --profile-name "${params.env_profile ?: ''}"
+            --profile-name "${params.env_profile ?: ''}" \
+            --restrict-tumours '${params.restrict_to_tumours ?: ''}' \
+            --restrict-segments '${params.restrict_to_segments ?: ''}'
 
     # If ALPACA was run with --output_all_solutions, promote the per-segment
     # all_solutions/ tree from the scratch work-dir to the user's output-dir

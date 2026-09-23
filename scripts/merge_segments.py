@@ -30,6 +30,8 @@ def parse_args():
     parser.add_argument("--worker-label", default="worker_high")
     parser.add_argument("--profile-config", default="")
     parser.add_argument("--profile-name", default="")
+    parser.add_argument("--restrict-tumours", default="", help="Optional comma-separated list of tumour dirs to restrict to")
+    parser.add_argument("--restrict-segments", default="", help="Optional comma-separated list of segment names to restrict to")
     return parser.parse_args()
 
 
@@ -334,14 +336,22 @@ def main():
         raise ValueError(f"All values in 'pred_CN_A' or 'pred_CN_B' are NaN. Sample rows with NaN:\n{nan_df_head}")
 
     segments_out = set(final['tumour_id'] + '_' + final['segment'].astype(str))
+
+    tumours_filter = {t.strip() for t in args.restrict_tumours.split(',') if t.strip()}
+    segments_filter = {s.strip() for s in args.restrict_segments.split(',') if s.strip()}
+
     input_dfs: List[pd.DataFrame] = []
     for tumour_id in [x for x in os.listdir(args.input_dir) if x != '.DS_Store']:
+        if tumours_filter and tumour_id not in tumours_filter:
+            continue
         try:
             tumour_df = pd.read_csv(os.path.join(args.input_dir, tumour_id, 'ALPACA_input_table.csv'))
             input_dfs.append(tumour_df)
         except Exception as exc:
             print(f"Error reading {tumour_id}: {exc}")
     input_df = pd.concat(input_dfs)
+    if segments_filter:
+        input_df = input_df[input_df['segment'].astype(str).isin(segments_filter)]
     segments_in = set(input_df['tumour_id'] + '_' + input_df['segment'].astype(str))
     missing_segments = sorted(segments_in - segments_out)
 
