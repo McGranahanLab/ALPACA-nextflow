@@ -118,7 +118,9 @@ process preparePool {
     python ${params.script_dir}/create_symlink_pool.py \
         --input_dir ${params.input_dir} \
         --done_dir ${params.done_dir} \
-        --pool_dir ${params.pool_dir}
+        --pool_dir ${params.pool_dir} \
+        --tumours '${params.restrict_to_tumours ?: ''}' \
+        --segments '${params.restrict_to_segments ?: ''}'
 
     # create the list of segments the workers should process
     ls -1 ${params.pool_dir} | sort > segments_to_process.txt

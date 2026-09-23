@@ -16,7 +16,7 @@ import pandas as pd
 from pathlib import Path
 
 
-def split_to_segments(tumour_dir: str) -> list[str]:
+def split_to_segments(tumour_dir: str, segments_filter: set[str] | None = None) -> list[str]:
     segments_dir_path = f"{tumour_dir}/segments"
     df_path = f"{tumour_dir}/ALPACA_input_table.csv"
     os.makedirs(segments_dir_path, exist_ok=True)
@@ -27,6 +27,8 @@ def split_to_segments(tumour_dir: str) -> list[str]:
     ), "Found multiple tumour ids. In tummour mode only one tumour_id is allowed per input csv"
     segments = []
     for segment, segment_df in df.groupby("segment"):
+        if segments_filter and str(segment) not in segments_filter:
+            continue
         segment_df_path = (
             f"{segments_dir_path}/ALPACA_input_table_{tumour_id}_{segment}.csv"
         )
@@ -52,6 +54,12 @@ p.add_argument(
     default=None,
     help="Optional comma-separated list of tumour dirs to include (names only)",
 )
+p.add_argument(
+    "--segments",
+    required=False,
+    default=None,
+    help="Optional comma-separated list of segment names to include",
+)
 args = p.parse_args()
 
 input_dir = Path(args.input_dir)
@@ -61,6 +69,10 @@ if args.tumours:
     tumours_filter = set([t.strip() for t in args.tumours.split(",") if t.strip()])
 else:
     tumours_filter = None
+if args.segments:
+    segments_filter = set([s.strip() for s in args.segments.split(",") if s.strip()])
+else:
+    segments_filter = None
 
 if not input_dir.exists():
     raise SystemExit(f"Input dir does not exist: {input_dir}")
@@ -83,7 +95,7 @@ for tumour_entry in input_dir.iterdir():
         continue
     if split_to_segments:
         try:
-            segment_paths = split_to_segments(str(tumour_entry))
+            segment_paths = split_to_segments(str(tumour_entry), segments_filter)
         except Exception as e:
             print(f"Warning: split_to_segments failed for {tumour_entry}: {e}")
             segment_paths = []
