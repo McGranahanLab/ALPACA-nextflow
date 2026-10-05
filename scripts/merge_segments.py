@@ -344,8 +344,11 @@ def main():
     for tumour_id in [x for x in os.listdir(args.input_dir) if x != '.DS_Store']:
         if tumours_filter and tumour_id not in tumours_filter:
             continue
+        alpca_input_table_path = os.path.join(args.input_dir, tumour_id, 'ALPACA_input_table.csv')
+        if os.path.exists(alpca_input_table_path) is False:
+            continue
         try:
-            tumour_df = pd.read_csv(os.path.join(args.input_dir, tumour_id, 'ALPACA_input_table.csv'))
+            tumour_df = pd.read_csv(alpca_input_table_path)
             input_dfs.append(tumour_df)
         except Exception as exc:
             print(f"Error reading {tumour_id}: {exc}")

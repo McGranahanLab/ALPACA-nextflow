@@ -120,6 +120,25 @@ else
 fi
 NXF_ARGS+=( --env_profile "${ENV_PROFILE:-local}" )
 
+if [[ -n "${ALPACA_CACHE_DIR:-}" ]]; then
+    NXF_ARGS+=( --alpaca_cache_dir "${ALPACA_CACHE_DIR:-}" )
+else
+	ALPACA_CACHE_DIR="${ALPACA_WORK}/alpaca_cache"
+    NXF_ARGS+=( --alpaca_cache_dir "$ALPACA_CACHE_DIR" )
+fi
+mkdir -p "$ALPACA_CACHE_DIR"
+
+
+NXF_ARGS+=( --genome_build "${GENOME_BUILD:-hg38}" )
+
+if [[ -n "${GENOME_CACHE_DIR:-}" ]]; then
+    NXF_ARGS+=( --genome_cache_dir "${GENOME_CACHE_DIR:-}" )
+else
+	GENOME_CACHE_DIR="${ALPACA_CACHE_DIR}/genomes"
+    NXF_ARGS+=( --genome_cache_dir "$GENOME_CACHE_DIR" )
+fi
+mkdir -p "$GENOME_CACHE_DIR"
+
 if [ -n "${ALPACA_ARGS:-}" ]; then
 	NXF_ARGS+=( "--alpaca_args=${ALPACA_ARGS}" )
 fi

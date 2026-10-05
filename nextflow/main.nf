@@ -309,7 +309,9 @@ process analysis {
             --output_directory "\${tumour_dir}" \
             --plot_output_mode notebook \
             --heatmap_palette "magma" \
-            --genome_build hg19
+            --alpaca_cache_dir ${params.alpaca_cache_dir} \
+            --genome_build ${params.genome_build} \
+            --genome_cache_dir ${params.genome_cache_dir}
     done
     
     # combine CCD tables into a single cohort-level table:
