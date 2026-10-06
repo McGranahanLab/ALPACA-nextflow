@@ -119,6 +119,7 @@ else
 	NXF_ARGS+=( --profile_config "" )
 fi
 NXF_ARGS+=( --env_profile "${ENV_PROFILE:-local}" )
+NXF_ARGS+=( --plot_output_mode "${PLOT_OUTPUT_MODE:-notebook}" )
 
 if [[ -n "${ALPACA_CACHE_DIR:-}" ]]; then
     NXF_ARGS+=( --alpaca_cache_dir "${ALPACA_CACHE_DIR:-}" )

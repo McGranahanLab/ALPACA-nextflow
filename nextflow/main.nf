@@ -307,7 +307,7 @@ process analysis {
         alpaca plot-tumour \
             --input_directory "\${input_tumour_directory}" \
             --output_directory "\${tumour_dir}" \
-            --plot_output_mode notebook \
+            --plot_output_mode "${params.plot_output_mode}" \
             --heatmap_palette "magma" \
             --alpaca_cache_dir ${params.alpaca_cache_dir} \
             --genome_build ${params.genome_build} \
