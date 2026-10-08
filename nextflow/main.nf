@@ -304,8 +304,10 @@ process analysis {
         
         # make plots: 
         input_tumour_directory=${params.input_dir}/\${tumour_id}
+        
         # to make caleido work:
         HOME=/tmp
+
         alpaca plot-tumour \
             --input_directory "\${input_tumour_directory}" \
             --output_directory "\${tumour_dir}" \
