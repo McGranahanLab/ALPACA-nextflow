@@ -22,9 +22,7 @@ def split_to_segments(tumour_dir: str, segments_filter: set[str] | None = None) 
     os.makedirs(segments_dir_path, exist_ok=True)
     df = pd.read_csv(df_path)
     tumour_id = df["tumour_id"].iloc[0]
-    assert len(
-        df["tumour_id"].unique()
-    ), "Found multiple tumour ids. In tummour mode only one tumour_id is allowed per input csv"
+    assert len(df["tumour_id"].unique()) == 1, "Found multiple tumour ids. In tummour mode only one tumour_id is allowed per input csv"
     segments = []
     for segment, segment_df in df.groupby("segment"):
         if segments_filter and str(segment) not in segments_filter:
