@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create a lightweight pool directory of symlinks to segment CSVs under a cohort.
+Create a lightweight pool directory of symlinks to segment tables (csv/tsv/parquet) under a cohort.
 Each worker will claim segments from this pool.
 
 Usage:
@@ -14,23 +14,29 @@ import os
 import argparse
 import pandas as pd
 from pathlib import Path
+from utils import read_any_table, write_table, find_table
 
 
 def split_to_segments(tumour_dir: str, segments_filter: set[str] | None = None) -> list[str]:
     segments_dir_path = f"{tumour_dir}/segments"
-    df_path = f"{tumour_dir}/ALPACA_input_table.csv"
+    df_path = find_table(tumour_dir, "ALPACA_input_table")
+    if df_path is None:
+        raise FileNotFoundError(f"No ALPACA_input_table.[csv|tsv|parquet] found in {tumour_dir}")
     os.makedirs(segments_dir_path, exist_ok=True)
-    df = pd.read_csv(df_path)
+    # segment files keep the format of the tumour's input table (ALPACA reads only csv/parquet, so tsv becomes csv)
+    df, file_type = read_any_table(df_path)
+    if file_type == "tsv":
+        file_type = "csv"
     tumour_id = df["tumour_id"].iloc[0]
-    assert len(df["tumour_id"].unique()) == 1, "Found multiple tumour ids. In tummour mode only one tumour_id is allowed per input csv"
+    assert len(df["tumour_id"].unique()) == 1, "Found multiple tumour ids. In tummour mode only one tumour_id is allowed per input table"
     segments = []
     for segment, segment_df in df.groupby("segment"):
         if segments_filter and str(segment) not in segments_filter:
             continue
         segment_df_path = (
-            f"{segments_dir_path}/ALPACA_input_table_{tumour_id}_{segment}.csv"
+            f"{segments_dir_path}/ALPACA_input_table_{tumour_id}_{segment}.{file_type}"
         )
-        segment_df.to_csv(segment_df_path, index=False)
+        write_table(segment_df, segment_df_path, file_type)
         segments.append(segment_df_path)
     return segments
 

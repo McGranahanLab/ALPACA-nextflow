@@ -11,26 +11,16 @@ import json
 import socket
 from datetime import datetime
 import shlex
-import csv
+from utils import read_any_table, is_table_file, strip_table_ext, table_type
 
 
 def get_tumour_id_from_seg_file(file_path):
-    with open(file_path, mode="r", newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        for i, row in enumerate(reader):
-            if i == 0:
-                if row[0] == "tumour_id":
-                    j = 0
-                    continue
-                else:
-                    for j in range(len(row)):
-                        if row[j] == "tumour_id":
-                            break
-                    else:
-                        raise ValueError(f"tumour_id column not found in {file_path}")
-            if i == 1:
-                return row[j]
-    return None
+    df, _ = read_any_table(file_path)
+    if "tumour_id" not in df.columns:
+        raise ValueError(f"tumour_id column not found in {file_path}")
+    if df.empty:
+        return None
+    return df["tumour_id"].iloc[0]
 
 
 def reorganize_all_solutions(segment_solution_output_dir, tumour, basenames):
@@ -48,16 +38,18 @@ def reorganize_all_solutions(segment_solution_output_dir, tumour, basenames):
         segment = bn.replace("ALPACA_input_table_", "")
         if segment.startswith(f"{tumour}_"):
             segment = segment[len(tumour) + 1 :]
-        segment = segment[: -len(".csv")] if segment.endswith(".csv") else segment
+        segment = strip_table_ext(segment)
         src_dir = os.path.join(all_solutions_root, segment)
         if not os.path.isdir(src_dir):
             continue
-        expected_names = {
-            f"all_{tumour}_{segment}.csv",
-            f"all_max_{tumour}_{segment}.csv",
-            f"{tumour}_{segment}_elbow_table.csv",
-            f"{tumour}_{segment}_elbow_plot.png",
-        }
+        # ALPACA writes these tables as csv or parquet depending on --output_format
+        expected_names = {f"{tumour}_{segment}_elbow_plot.png"}
+        for ext in ("csv", "parquet"):
+            expected_names |= {
+                f"all_{tumour}_{segment}.{ext}",
+                f"all_max_{tumour}_{segment}.{ext}",
+                f"{tumour}_{segment}_elbow_table.{ext}",
+            }
         dst_dir = os.path.join(all_solutions_root, tumour, segment)
         for fname in os.listdir(src_dir):
             if fname not in expected_names:
@@ -115,9 +107,11 @@ def run_alpaca_on_segment(claimed_paths, args):
         str(args.cpus),
     ]
     # parse extra alpaca args (a single quoted string) into tokens
-    if getattr(args, "alpaca_args", None):
-        extra = shlex.split(args.alpaca_args)
-        cmd += extra
+    extra = shlex.split(args.alpaca_args) if getattr(args, "alpaca_args", None) else []
+    # write ALPACA outputs in the same format as the segment input, unless the user set it explicitly
+    if not any(a == "--output_format" or a.startswith("--output_format=") for a in extra):
+        cmd += ["--output_format", table_type(claimed_paths[0])]
+    cmd += extra
     print("Running:", " ".join(cmd))
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     reorganize_all_solutions(segment_solution_output_dir, tumour, basenames)
@@ -219,11 +213,11 @@ def main():
             q_entries = sorted(os.listdir(worker_queue_dir))
         except Exception:
             q_entries = []
-        q_sample = [f for f in q_entries if f.endswith(".csv")]
-        msg = f"Inspecting queue_dir={worker_queue_dir!r} total_entries={len(q_entries)} csv_sample_count={len(q_sample)}"
+        q_sample = [f for f in q_entries if is_table_file(f)]
+        msg = f"Inspecting queue_dir={worker_queue_dir!r} total_entries={len(q_entries)} table_sample_count={len(q_sample)}"
         print(msg)
         worker_log.setdefault("messages", []).append(
-            {"ts": datetime.now().isoformat() + "Z", "msg": msg, "csv_sample": q_sample}
+            {"ts": datetime.now().isoformat() + "Z", "msg": msg, "table_sample": q_sample}
         )
         worker_log.setdefault("queue_snapshots", []).append(
             {"ts": datetime.now().isoformat() + "Z", "files": q_entries}
@@ -277,7 +271,7 @@ def main():
             return None
 
         # try to claim up to segments_per_claim files
-        to_claim = [f for f in q_entries if f.endswith(".csv")][
+        to_claim = [f for f in q_entries if is_table_file(f)][
             : args.segments_per_claim
         ]
         for bn in to_claim:

@@ -9,11 +9,12 @@ import argparse
 import shutil
 import traceback
 import json
+from utils import is_table_file
 
 
-def list_csv(path):
+def list_tables(path):
     try:
-        return [f for f in os.listdir(path) if f.endswith(".csv")]
+        return [f for f in os.listdir(path) if is_table_file(f)]
     except Exception:
         return []
 
@@ -70,7 +71,7 @@ def main():
     while True:
         try:
             # check if pool has files, iterate a few times in case there is delay in pool being populated
-            pool_files = list_csv(pool)
+            pool_files = list_tables(pool)
             if not pool_files:
                 idle += 1
                 if idle > args.max_idle_cycles:
@@ -89,7 +90,7 @@ def main():
             # for each worker, if queue empty, move up to segments-per-claim from pool
             for w in workers:
                 qdir = os.path.join(args.in_progress_dir, w, "queue")
-                qfiles = list_csv(qdir)
+                qfiles = list_tables(qdir)
                 if qfiles:
                     continue
                 # claim files for this worker
@@ -98,7 +99,7 @@ def main():
                     break
                 move_files(pool, qdir, to_move)
                 # refresh pool_files
-                pool_files = list_csv(pool)
+                pool_files = list_tables(pool)
         except Exception:
             traceback.print_exc()
             time.sleep(args.poll_interval_seconds)

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import pandas as pd
+from utils import read_any_table, find_table, strip_table_ext
 
 
 def parse_args():
@@ -46,10 +47,10 @@ def validate_segment_lists(expected_list, actual_list):
         else set()
     )
     expected = {
-        s.replace("ALPACA_input_table_", "").replace(".csv", "") for s in expected
+        strip_table_ext(s.replace("ALPACA_input_table_", "")) for s in expected
     }
     actual = {
-        s.replace("optimal_", "").replace("all_", "").replace(".csv", "")
+        strip_table_ext(s.replace("optimal_", "").replace("all_", ""))
         for s in actual
     }
     return sorted(expected - actual)
@@ -64,10 +65,10 @@ def expected_segments_by_tumour(input_dir, tumours_filter, segments_filter):
             continue
         if tumours_filter and tumour_id not in tumours_filter:
             continue
-        table_path = os.path.join(input_dir, tumour_id, "ALPACA_input_table.csv")
-        if not os.path.isfile(table_path):
+        table_path = find_table(os.path.join(input_dir, tumour_id), "ALPACA_input_table")
+        if table_path is None:
             continue
-        df = pd.read_csv(table_path)
+        df, _ = read_any_table(table_path)
         segments = set(df["segment"].astype(str))
         if segments_filter:
             segments &= segments_filter
@@ -89,17 +90,17 @@ def validate_all_solutions(output_dir, input_dir, tumours_filter, segments_filte
     for tumour_id, expected_segments in sorted(expected_by_tumour.items()):
         tumour_solutions_dir = all_solutions_root / tumour_id / "all_solutions"
 
-        all_csv = tumour_solutions_dir / f"all_{tumour_id}.csv"
-        if not all_csv.exists():
+        all_table = find_table(str(tumour_solutions_dir), f"all_{tumour_id}")
+        if all_table is None:
             rows.append(
                 {
                     "tumour_id": tumour_id,
                     "check": "missing_all_solutions_file",
-                    "details": str(all_csv),
+                    "details": str(tumour_solutions_dir / f"all_{tumour_id}.[csv|parquet]"),
                 }
             )
         else:
-            all_df = pd.read_csv(all_csv)
+            all_df, _ = read_any_table(all_table)
             present_segments = (
                 set(all_df["segment"].astype(str))
                 if "segment" in all_df.columns
@@ -115,23 +116,23 @@ def validate_all_solutions(output_dir, input_dir, tumours_filter, segments_filte
                     }
                 )
 
-        elbow_csv = tumour_solutions_dir / f"{tumour_id}_elbow_table.csv"
-        if not elbow_csv.exists():
+        elbow_table = find_table(str(tumour_solutions_dir), f"{tumour_id}_elbow_table")
+        if elbow_table is None:
             rows.append(
                 {
                     "tumour_id": tumour_id,
                     "check": "missing_elbow_table_file",
-                    "details": str(elbow_csv),
+                    "details": str(tumour_solutions_dir / f"{tumour_id}_elbow_table.[csv|parquet]"),
                 }
             )
         else:
-            elbow_df = pd.read_csv(elbow_csv)
+            elbow_df, _ = read_any_table(elbow_table)
             if "optimal_complexity" not in elbow_df.columns:
                 rows.append(
                     {
                         "tumour_id": tumour_id,
                         "check": "elbow_table_missing_optimal_complexity_column",
-                        "details": str(elbow_csv),
+                        "details": elbow_table,
                     }
                 )
             else:

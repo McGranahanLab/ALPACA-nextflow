@@ -32,7 +32,7 @@ Pass additional Nextflow flags after the env file, e.g. `./nextflow/run_nextflow
 
 | Variable | Purpose |
 | --- | --- |
-| `INPUT_DIR` / `OUTPUT_DIR` | Cohort input directory (one tumour subdir each) and final delivery location. |
+| `INPUT_DIR` / `OUTPUT_DIR` | Cohort input directory (one tumour subdir each, with `ALPACA_input_table.csv` or `ALPACA_input_table.parquet`) and final delivery location. Per-tumour outputs are written in the same format as that tumour's input table; cohort-level tables are parquet only if every tumour's outputs are parquet, otherwise csv. |
 | `ALPACA_WORK` | Scratch workspace that stores pool, in-progress, done, failed, and worker outputs. Safe to delete between runs (unless debugging). |
 | `NFX_REPORTS` | Folder for Nextflow HTML run reports (under `nextflow/` by default). |
 | `ENV_PROFILE` | Nextflow profile (`local` or `slurm`). Profiles extend `nextflow/nextflow.config` and optionally `slurm.conf`. |
@@ -52,7 +52,7 @@ Pass additional Nextflow flags after the env file, e.g. `./nextflow/run_nextflow
 - `preparePool` builds per-segment CSVs from tumour inputs (using `create_symlink_pool.py`), skips already completed segments, and emits the worker pool list.
 - `runDispatcher` continuously moves CSV symlinks from the pool into per-worker queues based on `segments_per_claim` until the pool stays empty for `dispatcher_max_idle_cycles`.
 - `workerTask` executes `segment_worker.py`, which repeatedly consumes queued segments, runs the ALPACA CLI (optionally batched per tumour), and triages results into `done` or `failed` directories while persisting verbose JSON logs and heartbeat files.
-- `mergeSegments` concatenates all per-segment ALPACA outputs into `all_tumours_combined.csv` and asserts full coverage against the cohort inputs.
+- `mergeSegments` concatenates all per-segment ALPACA outputs into `all_tumours_combined.<csv|parquet>` and asserts full coverage against the cohort inputs.
 - `analysis` splits the cohort file back into tumour-level outputs, runs `alpaca ancestor-delta` and `alpaca ccd`, and aggregates CCD metrics (`combine_ccd_results.py`).
 - `summariseReports` collects CI, monoclonal, elbow, and run-gap reports, writing consolidated CSVs into both `outputs_dir` and the final report folder.
 - `validateResults` compares the expected vs merged segment lists to detect any missing work before downstream cleanup.
@@ -62,7 +62,7 @@ Pass additional Nextflow flags after the env file, e.g. `./nextflow/run_nextflow
 - `${ALPACA_WORK}/outputs/segment_outputs` – raw per-segment ALPACA CSVs plus worker logs, heartbeats, and dispatcher/worker tokens.
 - `${OUTPUT_DIR}/reports` – consolidated CI/monoclonal/elbow/run-gap CSVs plus a copy of the env file used for the run.
 - `${OUTPUT_DIR}/tumour_results` – per-tumour ALPACA outputs (split from the merged cohort CSV).
-- `${OUTPUT_DIR}/cohort_results` – `all_tumours_combined.csv`, CCD cohort summary, and merged artefacts copied post-validation.
+- `${OUTPUT_DIR}/cohort_results` – `all_tumours_combined.<csv|parquet>`, CCD cohort summary, and merged artefacts copied post-validation.
 - `nextflow/reports/report_<timestamp>.html` – standard Nextflow execution report captured by `run_nextflow.sh`.
 
 ## Monitoring & recovery

@@ -104,9 +104,9 @@ process preparePool {
     """
     mkdir -p ${params.outputs_dir}
 
-    # If restart requested, clear tokens and remove failed/in_progress before building pool
-    if [ "${params.restart}" = "1" ]; then
-        echo "Restart requested: clearing dispatcher and worker tokens and cleaning failed/in_progress directories"
+    # If restart was not requested, clear tokens and remove failed/in_progress before building pool
+    if [ "${params.restart}" = "0" ]; then
+        echo "Starting from clean slate: clearing dispatcher and worker tokens and cleaning failed/in_progress directories"
         rm -f ${params.outputs_dir}/dispatcher.done || true
         rm -f ${params.outputs_dir}/worker_*.done || true
         mkdir -p ${params.failed_dir} ${params.in_progress_dir}
@@ -146,7 +146,7 @@ process mergeSegments {
     mkdir -p ${params.outputs_dir}/merged
     python ${params.script_dir}/merge_segments.py \
             --segments-dir "${params.outputs_dir}/segment_outputs" \
-            --out "${params.outputs_dir}/merged/all_tumours_combined.csv" \
+            --out "${params.outputs_dir}/merged/all_tumours_combined" \
             --input-dir "${params.input_dir}" \
             --output-dir "${params.output_dir}" \
             --nextflow-log "${workflow.launchDir}/.nextflow.log" \
@@ -281,26 +281,30 @@ process analysis {
 
     script:
     """
-    # split combined cohort file into per-tumour files:
+    # split combined cohort file into per-tumour files (format follows each tumour's input table):
     tumour_results=${params.output_dir}/tumour_results
     mkdir -p \${tumour_results}
+    combined_file=\$(ls ${params.outputs_dir}/merged/all_tumours_combined.{parquet,csv,tsv} 2>/dev/null | head -n 1)
     python ${params.script_dir}/split_cohort_to_tumours.py \
-        --combined_file ${params.outputs_dir}/merged/all_tumours_combined.csv \
-        --tumour_results \${tumour_results}
+        --combined_file "\${combined_file}" \
+        --tumour_results \${tumour_results} \
+        --input_dir ${params.input_dir}
 
     for tumour_dir in "\$tumour_results"/*; do
         tumour_id=\$(basename \${tumour_dir})
         input_tumour_directory=${params.input_dir}/\${tumour_id}
+        # ALPACA output is csv or parquet; downstream outputs follow its format
+        tumour_df_path=\$(ls "\${tumour_dir}"/ALPACA_output_\${tumour_id}.{parquet,csv} 2>/dev/null | head -n 1)
         # get cn change to ancestor:
         alpaca ancestor-delta \
             --output_directory "\${tumour_dir}" \
-            --tumour_df_path "\${tumour_dir}/ALPACA_output_\${tumour_id}.csv" \
+            --tumour_df_path "\${tumour_df_path}" \
             --tree_path "\${input_tumour_directory}/tree_paths.json"
 
         # calculate clone copy number diversity:
         alpaca ccd \
             --output_directory "\${tumour_dir}" \
-            --alpaca_output_path "\${tumour_dir}/ALPACA_output_\${tumour_id}.csv"
+            --alpaca_output_path "\${tumour_df_path}"
         
         # make plots: 
         input_tumour_directory=${params.input_dir}/\${tumour_id}
@@ -322,7 +326,7 @@ process analysis {
     mkdir -p ${params.output_dir}/cohort_results
     python ${params.script_dir}/combine_ccd_results.py \
         --tumour_results_dir "\$tumour_results" \
-        --output_path "${params.output_dir}/cohort_results/cohort_ccd_results.csv"
+        --output_path "${params.output_dir}/cohort_results/cohort_ccd_results"
 
     echo done > analysis_done.token
     """

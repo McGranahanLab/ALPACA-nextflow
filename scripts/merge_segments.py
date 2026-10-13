@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
+from utils import read_any_table, write_table, find_table, is_table_file, with_table_ext, common_table_type, TABLE_EXTENSIONS
 
 
 PROCESS_RE = re.compile(
@@ -20,7 +21,7 @@ FULL_HASH_RE = re.compile(r"(?P<hash>[0-9a-f]{2}/[0-9a-f]{7,32})\b")
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--segments-dir", required=True)
-    parser.add_argument("--out", required=True)
+    parser.add_argument("--out", required=True, help="Output path; the extension is set to match the segment outputs' format")
     parser.add_argument("--input-dir", required=True)
     parser.add_argument("--output-dir", default="")
     parser.add_argument("--nextflow-log", dest="nextflow_log", default="")
@@ -320,13 +321,15 @@ def generate_failure_report(
 def main():
     args = parse_args()
     seg_dfs: List[pd.DataFrame] = []
+    seg_types = set()
     for file_name in os.listdir(args.segments_dir):
-        if not file_name.endswith(".csv"):
+        if not is_table_file(file_name):
             continue
         if any(token in file_name for token in ("combined", "report", "summary")):
             continue
-        df = pd.read_csv(os.path.join(args.segments_dir, file_name))
+        df, file_type = read_any_table(os.path.join(args.segments_dir, file_name))
         seg_dfs.append(df)
+        seg_types.add(file_type)
 
     final = pd.concat(seg_dfs, ignore_index=True)
 
@@ -344,11 +347,11 @@ def main():
     for tumour_id in [x for x in os.listdir(args.input_dir) if x != '.DS_Store']:
         if tumours_filter and tumour_id not in tumours_filter:
             continue
-        alpca_input_table_path = os.path.join(args.input_dir, tumour_id, 'ALPACA_input_table.csv')
-        if os.path.exists(alpca_input_table_path) is False:
+        alpca_input_table_path = find_table(os.path.join(args.input_dir, tumour_id), 'ALPACA_input_table')
+        if alpca_input_table_path is None:
             continue
         try:
-            tumour_df = pd.read_csv(alpca_input_table_path)
+            tumour_df, _ = read_any_table(alpca_input_table_path)
             input_dfs.append(tumour_df)
         except Exception as exc:
             print(f"Error reading {tumour_id}: {exc}")
@@ -359,7 +362,14 @@ def main():
     missing_segments = sorted(segments_in - segments_out)
 
     if not missing_segments:
-        final.to_csv(args.out, index=False)
+        out_path = with_table_ext(args.out, common_table_type(seg_types))
+        # drop a merged table left in another format by a previous run, so downstream steps find a single file
+        for file_type in TABLE_EXTENSIONS.values():
+            stale = with_table_ext(args.out, file_type)
+            if stale != out_path and os.path.exists(stale):
+                os.remove(stale)
+        write_table(final, out_path)
+        print(f"Wrote merged segments to {out_path}")
         with open('merged_segments.txt', 'w', encoding='utf-8') as handle:
             for seg in sorted(segments_in):
                 handle.write(f"{seg}\n")

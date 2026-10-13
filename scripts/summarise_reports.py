@@ -7,6 +7,13 @@ import os
 import glob
 import sys
 import pandas as pd
+from utils import read_any_table, is_table_file
+
+
+def glob_tables(dirpath, suffix):
+    """Find per-segment report tables named *<suffix>.<ext> in any supported table format."""
+    files = glob.glob(os.path.join(dirpath, f"*{suffix}.*"))
+    return sorted(f for f in files if is_table_file(f))
 
 
 def process_ci_reports(dirpath, delete=False, outpath=None):
@@ -71,18 +78,17 @@ def process_ci_reports(dirpath, delete=False, outpath=None):
 
 
 def process_monoclonal_reports(dirpath, delete=False, outpath=None):
-    pattern = os.path.join(dirpath, "*_monoclonal_samples_report.csv")
-    files = sorted(glob.glob(pattern))
+    files = glob_tables(dirpath, "_monoclonal_samples_report")
     if outpath is None:
         outpath = "monoclonal_samples_report.csv"
-    # each file is a csv with header, concatenate them:
+    # each file is a table (csv or parquet) with header, concatenate them:
     if not files:
         combined_df = pd.DataFrame(columns=['tumour_id', 'sample', 'segment', 'cpnA', 'cpnB', 'distance_to_integer_A', 'distance_to_integer_B'])
     else:
         dfs = []
         for fp in files:
             try:
-                df = pd.read_csv(fp)
+                df, _ = read_any_table(fp)
                 dfs.append(df)
             except Exception as e:
                 print(f"Warning: failed to read {fp}: {e}", file=sys.stderr)
@@ -98,18 +104,17 @@ def process_monoclonal_reports(dirpath, delete=False, outpath=None):
 
 
 def process_elbow_increase_reports(dirpath, delete, outpath):
-    pattern = os.path.join(dirpath, "*_elbow_increase_report.csv")
-    files = sorted(glob.glob(pattern))
+    files = glob_tables(dirpath, "_elbow_increase_report")
     if outpath is None:
         outpath = "elbow_increase_report.csv"
-    # each file is a csv with header, concatenate them or make an empty dataframe
+    # each file is a table (csv or parquet) with header, concatenate them or make an empty dataframe
     if not files:
         combined_df = pd.DataFrame(columns=['complexity', 'D_score', 'CI_score', 'allowed_complexity', 'issue', 'tumour_id', 'segment'])
     else:
         dfs = []
         for fp in files:
             try:
-                df = pd.read_csv(fp)
+                df, _ = read_any_table(fp)
                 dfs.append(df)
             except Exception as e:
                 print(f"Warning: failed to read {fp}: {e}", file=sys.stderr)
@@ -130,8 +135,7 @@ def process_run_gap_summary_reports(dirpath, delete=False, outpath=None):
     Only includes segments with non-zero gap (non-optimal solutions).
     Reports gap value and reason (time_limit, gap_tolerance, or other).
     """
-    pattern = os.path.join(dirpath, "*_run_gap_summary.csv")
-    files = sorted(glob.glob(pattern))
+    files = glob_tables(dirpath, "_run_gap_summary")
     if outpath is None:
         outpath = "run_gap_summary.csv"
     
@@ -145,7 +149,7 @@ def process_run_gap_summary_reports(dirpath, delete=False, outpath=None):
         dfs = []
         for fp in files:
             try:
-                df = pd.read_csv(fp)
+                df, _ = read_any_table(fp)
                 dfs.append(df)
             except Exception as e:
                 print(f"Warning: failed to read {fp}: {e}", file=sys.stderr)

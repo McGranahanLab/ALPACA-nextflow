@@ -8,19 +8,19 @@ Workers write per-segment optimal solutions to
 (the worker moves ALPACA's raw per-segment output there to avoid different
 tumours colliding on a shared segment id):
 
-    all_<tumour>_<segment>.csv          # candidate solutions (elbow search)
-    all_max_<tumour>_<segment>.csv      # unconstrained max solution
-    <tumour>_<segment>_elbow_table.csv  # elbow-search metadata
+    all_<tumour>_<segment>.<ext>          # candidate solutions (elbow search)
+    all_max_<tumour>_<segment>.<ext>      # unconstrained max solution
+    <tumour>_<segment>_elbow_table.<ext>  # elbow-search metadata
     <tumour>_<segment>_elbow_plot.png
 
-The promoted layout is:
+where <ext> is csv or parquet (ALPACA's --output_format). The promoted layout is:
 
     ${OUTPUT_DIR}/all_solutions/
         <tumour>/
             all_solutions/
-                all_<tumour>.csv
-                all_max_<tumour>.csv
-                <tumour>_elbow_table.csv
+                all_<tumour>.<ext>
+                all_max_<tumour>.<ext>
+                <tumour>_elbow_table.<ext>
             elbow_plots/
                 <tumour>_<segment>_elbow_plot.png
 
@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Dict, List
 
 import pandas as pd
+from utils import read_any_table, write_table, is_table_file, strip_table_ext, with_table_ext, common_table_type
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,18 +54,23 @@ def parse_args() -> argparse.Namespace:
 
 
 def concat_pattern(files: List[Path], out_path: Path) -> None:
+    """Concatenate segment tables into out_path; the extension follows the inputs' format."""
     if not files:
         return
     frames = []
+    file_types = set()
     for f in files:
         try:
-            frames.append(pd.read_csv(f))
+            df, file_type = read_any_table(str(f))
+            frames.append(df)
+            file_types.add(file_type)
         except Exception as exc:
             print(f"WARN: could not read {f}: {exc}", file=sys.stderr)
     if not frames:
         return
+    out_path = Path(with_table_ext(str(out_path), common_table_type(file_types)))
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.concat(frames, ignore_index=True).to_csv(out_path, index=False)
+    write_table(pd.concat(frames, ignore_index=True), str(out_path))
     print(f"Wrote {out_path} ({len(frames)} segment(s))")
 
 
@@ -93,16 +99,12 @@ def promote_all_solutions(segments_dir: Path | str, output_dir: Path | str) -> N
             for f in sorted(segment_dir.iterdir()):
                 if not f.is_file():
                     continue
-                if (
-                    f.name.startswith("all_")
-                    and f.suffix == ".csv"
-                    and not f.name.startswith("all_max_")
-                ):
-                    tumour_bucket["all"].append(f)
-                elif f.name.startswith("all_max_") and f.suffix == ".csv":
-                    tumour_bucket["all_max"].append(f)
-                elif f.name.endswith("_elbow_table.csv"):
+                if is_table_file(f.name) and strip_table_ext(f.name).endswith("_elbow_table"):
                     tumour_bucket["elbow_table"].append(f)
+                elif is_table_file(f.name) and f.name.startswith("all_max_"):
+                    tumour_bucket["all_max"].append(f)
+                elif is_table_file(f.name) and f.name.startswith("all_"):
+                    tumour_bucket["all"].append(f)
                 elif f.name.endswith("_elbow_plot.png"):
                     tumour_bucket["elbow_plot"].append(f)
 
@@ -113,9 +115,9 @@ def promote_all_solutions(segments_dir: Path | str, output_dir: Path | str) -> N
         all_dir.mkdir(parents=True, exist_ok=True)
         plot_dir.mkdir(parents=True, exist_ok=True)
 
-        concat_pattern(groups["all"], all_dir / f"all_{tumour}.csv")
-        concat_pattern(groups["all_max"], all_dir / f"all_max_{tumour}.csv")
-        concat_pattern(groups["elbow_table"], all_dir / f"{tumour}_elbow_table.csv")
+        concat_pattern(groups["all"], all_dir / f"all_{tumour}")
+        concat_pattern(groups["all_max"], all_dir / f"all_max_{tumour}")
+        concat_pattern(groups["elbow_table"], all_dir / f"{tumour}_elbow_table")
 
         for src_plot in sorted(groups["elbow_plot"]):
             dst_plot = plot_dir / src_plot.name
