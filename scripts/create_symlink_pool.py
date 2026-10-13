@@ -93,12 +93,11 @@ for tumour_entry in input_dir.iterdir():
     tumour_name = tumour_entry.name
     if tumours_filter and tumour_name not in tumours_filter:
         continue
-    if split_to_segments:
-        try:
-            segment_paths = split_to_segments(str(tumour_entry), segments_filter)
-        except Exception as e:
-            print(f"Warning: split_to_segments failed for {tumour_entry}: {e}")
-            segment_paths = []
+    try:
+        segment_paths = split_to_segments(str(tumour_entry), segments_filter)
+    except Exception as e:
+        print(f"Warning: split_to_segments failed for {tumour_entry}: {e}")
+        segment_paths = []
 
     for src_path in segment_paths:
         src = Path(src_path)
