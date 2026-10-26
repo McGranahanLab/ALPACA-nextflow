@@ -342,11 +342,32 @@ def main():
         worker_log["last_work_ts"] = time.time()
         retries = 0
         success = False
-        # Group claimed files by tumour so we can invoke ALPACA once per tumour
+        # Group claimed files by tumour so we can invoke ALPACA once per tumour.
+        # The tumour id is read from the table itself: parsing it from the filename
+        # is ambiguous because both tumour ids and segment names may contain "_".
+        # Files whose tumour id cannot be determined map to None and end up in failed_dir.
+        tumour_of = {}
         groups = {}
         for p in claimed_paths:
-            bn = os.path.basename(p)
-            tumour = bn.replace("ALPACA_input_table_", "").split("_", 1)[0]
+            try:
+                tumour = get_tumour_id_from_seg_file(p)
+            except Exception as e:
+                print(f"Could not read tumour_id from '{p}': {e}", file=sys.stderr)
+                tumour = None
+            if tumour is not None and args.input_dir and not os.path.isdir(
+                os.path.join(args.input_dir, str(tumour))
+            ):
+                print(
+                    f"tumour_id '{tumour}' from '{p}' has no matching directory in {args.input_dir}",
+                    file=sys.stderr,
+                )
+                tumour = None
+            tumour_of[p] = tumour
+            if tumour is None:
+                worker_log.setdefault("messages", []).append(
+                    f"Unresolvable tumour_id for {os.path.basename(p)}; moving to failed"
+                )
+                continue
             groups.setdefault(tumour, []).append(p)
 
         # For each group (tumour), run ALPACA once with multiple input files
@@ -385,10 +406,7 @@ def main():
 
         # Move each processed claimed file to done or failed depending on its group's result
         for p in claimed_paths:
-            tumour = (
-                os.path.basename(p).replace("ALPACA_input_table_", "").split("_", 1)[0]
-            )
-            success = group_results.get(tumour, False)
+            success = group_results.get(tumour_of[p], False)
             if success:
                 dest = os.path.join(args.done_dir, os.path.basename(p))
             else:
