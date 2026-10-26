@@ -18,10 +18,10 @@ workflow {
     def all_workers_done = worker_done_ch.collect()
     // run merge after all workers finished
     def merge = mergeSegments(all_workers_done)
-    // run the analysis:
-    def analysis_token = analysis(merge)
     // once workers are done, run report summariser
-    summariseReports(all_workers_done)
+    def summary = summariseReports(all_workers_done)
+    // run the analysis (needs the summarised edge case reports for the warning files):
+    def analysis_token = analysis(merge, summary)
     // validate results: collect the prepared segments list (pool.out) and merged segments list (merge.out) and compare
     def expected_ch = pool.collect()
     def actual_ch = merge.collect()
@@ -164,7 +164,10 @@ process mergeSegments {
             --profile-config "${params.profile_config ?: ''}" \
             --profile-name "${params.env_profile ?: ''}" \
             --restrict-tumours '${params.restrict_to_tumours ?: ''}' \
-            --restrict-segments '${params.restrict_to_segments ?: ''}'
+            --restrict-segments '${params.restrict_to_segments ?: ''}' \
+            --include-single-clone ${params.include_single_clone} \
+            --include-single-sample ${params.include_single_sample} \
+            --include-single-clone-and-single-sample ${params.include_single_clone_and_single_sample}
 
     # If ALPACA was run with --output_all_solutions, promote the per-segment
     # all_solutions/ tree from the scratch work-dir to the user's output-dir
@@ -239,12 +242,14 @@ process summariseReports {
     cp monoclonal_samples_report.csv ${params.outputs_dir}/reports/monoclonal_samples_report.csv || true
     cp elbow_increase_report.csv ${params.outputs_dir}/reports/elbow_increase_report.csv || true
     cp run_gap_summary.csv ${params.outputs_dir}/reports/run_gap_summary.csv || true
+    cp edge_case_report.csv ${params.outputs_dir}/reports/edge_case_report.csv || true
     # copy to user-specified output directory
     mkdir -p ${params.output_dir}/reports
     cp ci_modified_report.csv ${params.output_dir}/reports/ci_modified_report.csv || true
     cp monoclonal_samples_report.csv ${params.output_dir}/reports/monoclonal_samples_report.csv || true
     cp elbow_increase_report.csv ${params.output_dir}/reports/elbow_increase_report.csv || true
     cp run_gap_summary.csv ${params.output_dir}/reports/run_gap_summary.csv || true
+    cp edge_case_report.csv ${params.output_dir}/reports/edge_case_report.csv || true
     """
 }
 
@@ -285,17 +290,23 @@ process analysis {
 
     input:
     file 'merged_segments.txt' // start analysis after merging is done
+    file 'ci_modified_report.csv' // and after the segment reports are summarised
 
     script:
     """
-    # split combined cohort file into per-tumour files:
+    # split the unfiltered cohort file into per-tumour files; single clone / single sample
+    # tumours go to their own directory whether or not they are in all_tumours_combined:
     tumour_results=${params.output_dir}/tumour_results
+    edge_case_results=${params.output_dir}/single_clone_or_sample
     mkdir -p \${tumour_results}
     python ${params.script_dir}/split_cohort_to_tumours.py \
-        --combined_file ${params.outputs_dir}/merged/all_tumours_combined.csv \
-        --tumour_results \${tumour_results}
+        --combined_file ${params.outputs_dir}/all_tumours_unfiltered.csv \
+        --tumour_results \${tumour_results} \
+        --classification ${params.outputs_dir}/tumour_classification.csv \
+        --edge_case_results \${edge_case_results}
 
-    for tumour_dir in "\$tumour_results"/*; do
+    for tumour_dir in "\$tumour_results"/* "\$edge_case_results"/*; do
+        [ -d "\${tumour_dir}" ] || continue
         tumour_id=\$(basename \${tumour_dir})
         input_tumour_directory=${params.input_dir}/\${tumour_id}
         # get cn change to ancestor:
@@ -322,11 +333,20 @@ process analysis {
             --genome_cache_dir ${params.genome_cache_dir}
     done
     
-    # combine CCD tables into a single cohort-level table:
+    # combine CCD tables into a single cohort-level table (excluded and single-clone tumours are skipped):
     mkdir -p ${params.output_dir}/cohort_results
     python ${params.script_dir}/combine_ccd_results.py \
-        --tumour_results_dir "\$tumour_results" \
+        --tumour_results_dir "\$tumour_results" "\$edge_case_results" \
+        --classification ${params.outputs_dir}/tumour_classification.csv \
         --output_path "${params.output_dir}/cohort_results/cohort_ccd_results.csv"
+
+    # per-tumour warning_*.txt files and the cohort-level single clone / single sample report:
+    python ${params.script_dir}/report_edge_case_tumours.py \
+        --classification ${params.outputs_dir}/tumour_classification.csv \
+        --segment_report ${params.outputs_dir}/reports/edge_case_report.csv \
+        --input_dir ${params.input_dir} \
+        --edge_case_results "\$edge_case_results" \
+        --reports_dir ${params.output_dir}/reports
 
     echo done > analysis_done.token
     """

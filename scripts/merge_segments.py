@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+from tumour_classification import (
+    SINGLE_CLONE,
+    SINGLE_CLONE_AND_SINGLE_SAMPLE,
+    SINGLE_SAMPLE,
+    classify_cohort,
+)
 
 # "Oct-13 09:44:50.018 [Task submitter] DEBUG nextflow.executor.GridTaskHandler - [SLURM] submitted
 #  process workerTask (167) > jobId: 60633732; workDir: /path/work/0b/cdc631dacf..."
@@ -77,7 +83,35 @@ def parse_args():
         default="",
         help="Optional comma-separated list of segment names to restrict to",
     )
+    for category in (SINGLE_CLONE, SINGLE_SAMPLE, SINGLE_CLONE_AND_SINGLE_SAMPLE):
+        parser.add_argument(
+            f"--include-{category.replace('_', '-')}",
+            dest=f"include_{category}",
+            type=int,
+            choices=[0, 1],
+            default=0,
+            help=f"Include {category.replace('_', ' ')} tumours in the combined cohort table",
+        )
     return parser.parse_args()
+
+
+def write_combined_tables(final: pd.DataFrame, args) -> None:
+    """Write the cohort table without excluded single clone / single sample tumours.
+
+    The unfiltered table and the tumour classification go to the outputs dir, where
+    the analysis step uses them to produce per-tumour results for every tumour.
+    """
+    include = {c: bool(getattr(args, f"include_{c}")) for c in (SINGLE_CLONE, SINGLE_SAMPLE, SINGLE_CLONE_AND_SINGLE_SAMPLE)}
+    tumour_ids = final["tumour_id"].astype(str).unique()
+    classification = classify_cohort(args.input_dir, tumour_ids, include)
+    side_dir = args.outputs_dir or os.path.dirname(os.path.abspath(args.out))
+    classification.to_csv(os.path.join(side_dir, "tumour_classification.csv"), index=False)
+    final.to_csv(os.path.join(side_dir, "all_tumours_unfiltered.csv"), index=False)
+    included = set(classification.loc[classification["included"], "tumour_id"])
+    excluded = classification.loc[~classification["included"], "tumour_id"].tolist()
+    if excluded:
+        print(f"Excluding {len(excluded)} single clone / single sample tumour(s) from {args.out}: {excluded}")
+    final[final["tumour_id"].astype(str).isin(included)].to_csv(args.out, index=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -857,7 +891,7 @@ def main():
     missing_segments = sorted(segments_in - segments_out)
 
     if not missing_segments:
-        final.to_csv(args.out, index=False)
+        write_combined_tables(final, args)
         with open("merged_segments.txt", "w", encoding="utf-8") as handle:
             for seg in sorted(segments_in):
                 handle.write(f"{seg}\n")

@@ -47,6 +47,7 @@ Pass additional Nextflow flags after the env file, e.g. `./nextflow/run_nextflow
 | `DEBUG` | Keep `alpaca-work` contents if non-zero; otherwise the cleanup step removes intermediates after validation. |
 | `DELETE_REPORTS` | If `1`, per-segment report JSON/CSVs are deleted after consolidation to save space. |
 | `ALPACA_ARGS` | Extra flags forwarded untouched to the ALPACA CLI inside each worker (wrap multi-arg strings in quotes). |
+| `INCLUDE_SINGLE_CLONE` / `INCLUDE_SINGLE_SAMPLE` / `INCLUDE_SINGLE_CLONE_AND_SINGLE_SAMPLE` | Set to `1` to include tumours with one clone (several samples), one sample (several clones), or one clone and one sample in `cohort_results/all_tumours_combined.*` and the cohort-level analysis. All default to `0` (excluded). Such tumours are always solved; see [Single clone / single sample tumours](#single-clone--single-sample-tumours). |
 
 ## Process outline
 - `preparePool` builds per-segment CSVs from tumour inputs (using `create_symlink_pool.py`), skips already completed segments, and emits the worker pool list.
@@ -62,8 +63,26 @@ Pass additional Nextflow flags after the env file, e.g. `./nextflow/run_nextflow
 - `${ALPACA_WORK}/outputs/segment_outputs` – raw per-segment ALPACA CSVs plus worker logs, heartbeats, and dispatcher/worker tokens.
 - `${OUTPUT_DIR}/reports` – consolidated CI/monoclonal/elbow/run-gap CSVs plus a copy of the env file used for the run.
 - `${OUTPUT_DIR}/tumour_results` – per-tumour ALPACA outputs (split from the merged cohort CSV).
+- `${OUTPUT_DIR}/single_clone_or_sample` – the same per-tumour outputs for single clone / single sample tumours, each with a `warning_<category>.txt` and `edge_case_report.csv`.
 - `${OUTPUT_DIR}/cohort_results` – `all_tumours_combined.<csv|parquet>`, CCD cohort summary, and merged artefacts copied post-validation.
 - `nextflow/reports/report_<timestamp>.html` – standard Nextflow execution report captured by `run_nextflow.sh`.
+
+## Single clone / single sample tumours
+Tumours are classified from `cp_table.csv` (rows are the tree's clones, columns are samples):
+
+| Category | Warning file | How ALPACA solves it |
+| --- | --- | --- |
+| one clone, several samples | `warning_single_clone.txt` | No ILP or elbow search: per allele, the integer that minimises confidence-interval misses and then the summed distance to the observations (homozygous-deletion rule kept). Segments whose samples' CIs share no common integer are flagged `no_common_integer`. |
+| several clones, one sample | `warning_single_sample.txt` | ILP with heterogeneity restricted (clones forced clonal where the sample's CI admits a single integer; ALPACA `--single_sample_restrict_heterogeneity`). Segments where another assignment fits equally well are flagged `ambiguous`. |
+| one clone, one sample | `warning_single_clone_and_single_sample.txt` | As for one clone; segments whose CI contains no integer are flagged `ci_contains_no_integer`. |
+
+These tumours are always solved and written to `${OUTPUT_DIR}/single_clone_or_sample/<tumour>/`. The `INCLUDE_*` switches in `pipeline.env` decide whether each category also goes into `cohort_results/all_tumours_combined.*` and `cohort_ccd_results` (single-clone tumours never enter the cohort CCD table, as their CCD is 0 by construction). `${OUTPUT_DIR}/reports/single_clone_or_sample_report.{csv,txt}` lists every affected tumour, its flags and whether it was included or excluded; `reports/edge_case_report.csv` has the per-segment flags.
+
+To exercise all categories end-to-end, generate synthetic inputs and point `INPUT_DIR` at them:
+
+```bash
+python scripts/make_synthetic_test_data.py --out_dir test_data/synthetic_input
+```
 
 ## Monitoring & recovery
 - Worker progress can be tracked via `${ALPACA_WORK}/outputs/worker_*.done` tokens and JSON logs under `worker_logs/`.
