@@ -6,9 +6,59 @@
 println "=== Pipeline params ==="
 params.sort().each { k, v -> println "${k} = ${v}" }
 def use_container = params.use_container in [true, 1, '1', 'true', 'TRUE', 'yes', 'YES', 'on', 'ON']
+
+// Gurobi is used either directly (--solver gurobi) or through Pyomo (--solver pyomo --pyomo_solver gurobi*).
+// Defaults mirror ALPACA's argument parser: --solver pyomo, --pyomo_solver scip.
+def alpaca_args = (params.alpaca_args ?: '').toString()
+def alpaca_arg_value = { String name, String dflt ->
+    def m = alpaca_args =~ /(?:^|\s)--${name}(?:=|\s+)["']?([^\s"']+)/
+    m.find() ? m.group(1) : dflt
+}
+def alpaca_solver = alpaca_arg_value('solver', 'pyomo').toLowerCase()
+def alpaca_pyomo_solver = alpaca_arg_value('pyomo_solver', 'scip').toLowerCase()
+def uses_gurobi = alpaca_solver == 'gurobi' || (alpaca_solver == 'pyomo' && alpaca_pyomo_solver.startsWith('gurobi'))
+def solver_description = alpaca_solver == 'gurobi' ? 'gurobi (Gurobi API)' : "pyomo (${alpaca_pyomo_solver})"
+// written next to used_config_*.env (see run_nextflow.sh)
+def licence_error_file = file("${params.output_dir}/reports/LICENCE_ERROR.txt")
+
 workflow {
+    // If Gurobi is the solver, make sure a licence can be acquired before doing any work
+    def licence_ok
+    if (uses_gurobi) {
+        licence_ok = checkGurobiLicence().map { status, check_log ->
+            if (status == 'OK') {
+                licence_error_file.delete()  // drop a stale error file from a previous run
+                return 'OK'
+            }
+            def check_output = check_log.text.trim()
+            def message = """\
+                |GUROBI LICENCE CHECK FAILED - pipeline aborted before processing any segments.
+                |
+                |Time:                ${new Date().format('yyyy-MM-dd HH:mm:ss')}
+                |Solver:              ${solver_description}
+                |ALPACA_ARGS:         ${alpaca_args}
+                |GUROBI_LICENSE_FILE: ${params.gurobi_license_file ?: '(not set)'}
+                |Use container:       ${use_container}
+                |Check work dir:      ${check_log.parent}
+                |
+                |Output of check_gurobi_licence_server.py:
+                |${check_output}
+                |
+                |Check that the licence server is reachable from the compute nodes, that the licence
+                |file in pipeline.env (GUROBI_LICENSE_FILE) is valid, and that no other jobs hold all
+                |available licence tokens. Alternatively switch solver in ALPACA_ARGS (e.g. --solver pyomo --pyomo_solver scip).
+                |""".stripMargin()
+            licence_error_file.parent.mkdirs()
+            licence_error_file.text = message
+            def banner = '!' * 100
+            System.err.println("\n${banner}\n${banner}\n\n${message}\nDetails written to: ${licence_error_file}\n\n${banner}\n${banner}\n")
+            error("Gurobi licence not available - see ${licence_error_file}")
+        }
+    } else {
+        licence_ok = Channel.value('not_needed')
+    }
     // Prepare the lightweight symlink pool once before starting workers - workers will claimed unsolved segments from here
-    def pool = preparePool()
+    def pool = preparePool(licence_ok)
     // once pool is ready, start the dispatcher; it monitors workers progress and tops up each workers queue
     runDispatcher(pool)
     def worker_input = pool.flatMap { segfile ->
@@ -92,10 +142,34 @@ process runDispatcher {
 }
 
 
+process checkGurobiLicence {
+    container use_container ? params.alpaca_container : null
+    label 'low'
+    tag 'checkGurobiLicence'
+
+    output:
+    tuple env(LICENCE_STATUS), path('licence_check.log')
+
+    script:
+    // always exit 0 and report the status instead: slurm.conf sets errorStrategy 'ignore',
+    // which would silently swallow a failed check; the workflow aborts on a FAILED status
+    """
+    if python ${params.script_dir}/check_gurobi_licence_server.py > licence_check.log 2>&1; then
+        LICENCE_STATUS=OK
+    else
+        LICENCE_STATUS=FAILED
+        cat licence_check.log >&2
+    fi
+    """
+}
+
 process preparePool {
     container use_container ? params.alpaca_container : null
     label 'low'
     tag 'preparePool'
+
+    input:
+    val licence_ok
 
     output:
     file 'segments_to_process.txt'
@@ -299,8 +373,10 @@ process analysis {
     tumour_results=${params.output_dir}/tumour_results
     edge_case_results=${params.output_dir}/single_clone_or_sample
     mkdir -p \${tumour_results}
+    # merge_segments.py writes the unfiltered table in the segment outputs' format (csv or parquet)
+    combined_file=\$(ls ${params.outputs_dir}/all_tumours_unfiltered.{parquet,csv,tsv} 2>/dev/null | head -n 1)
     python ${params.script_dir}/split_cohort_to_tumours.py \
-        --combined_file ${params.outputs_dir}/all_tumours_unfiltered.csv \
+        --combined_file "\${combined_file}" \
         --tumour_results \${tumour_results} \
         --classification ${params.outputs_dir}/tumour_classification.csv \
         --edge_case_results \${edge_case_results}
