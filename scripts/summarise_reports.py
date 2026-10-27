@@ -8,12 +8,21 @@ import glob
 import sys
 import pandas as pd
 from utils import read_any_table, is_table_file
+from alpaca.edge_cases import REPORT_SUFFIX, combine_segment_reports
 
 
 def glob_tables(dirpath, suffix):
     """Find per-segment report tables named *<suffix>.<ext> in any supported table format."""
     files = glob.glob(os.path.join(dirpath, f"*{suffix}.*"))
     return sorted(f for f in files if is_table_file(f))
+
+
+def remove_files(files):
+    for fp in files:
+        try:
+            os.remove(fp)
+        except Exception as e:
+            print(f"Warning: failed to remove {fp}: {e}", file=sys.stderr)
 
 
 def process_ci_reports(dirpath, delete=False, outpath=None):
@@ -96,11 +105,8 @@ def process_monoclonal_reports(dirpath, delete=False, outpath=None):
         if dfs:
             combined_df = pd.concat(dfs, ignore_index=True)
     combined_df.to_csv(outpath, index=False)
-    if delete and bool(files):
-        try:
-            os.remove(fp)
-        except Exception as e:
-            print(f"Warning: failed to remove {fp}: {e}", file=sys.stderr)
+    if delete:
+        remove_files(files)
 
 
 def process_elbow_increase_reports(dirpath, delete, outpath):
@@ -122,11 +128,8 @@ def process_elbow_increase_reports(dirpath, delete, outpath):
         if dfs:
             combined_df = pd.concat(dfs, ignore_index=True)
     combined_df.to_csv(outpath, index=False)
-    if delete and bool(files):
-        try:
-            os.remove(fp)
-        except Exception as e:
-            print(f"Warning: failed to remove {fp}: {e}", file=sys.stderr)
+    if delete:
+        remove_files(files)
 
 
 def process_run_gap_summary_reports(dirpath, delete=False, outpath=None):
@@ -173,6 +176,16 @@ def process_run_gap_summary_reports(dirpath, delete=False, outpath=None):
                 print(f"Warning: failed to remove {fp}: {e}", file=sys.stderr)
 
 
+def process_edge_case_reports(dirpath, delete=False, outpath=None):
+    """Combine per-segment single clone / single sample reports written by ALPACA."""
+    files = glob_tables(dirpath, REPORT_SUFFIX)
+    if outpath is None:
+        outpath = "edge_case_report.csv"
+    combine_segment_reports(files).to_csv(outpath, index=False)
+    if delete:
+        remove_files(files)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("reports_dir", help="Directory containing report JSON files")
@@ -192,6 +205,7 @@ def main():
     process_monoclonal_reports(args.reports_dir, delete=args.delete, outpath=None)
     process_elbow_increase_reports(args.reports_dir, delete=args.delete, outpath=None)
     process_run_gap_summary_reports(args.reports_dir, delete=args.delete, outpath=None)
+    process_edge_case_reports(args.reports_dir, delete=args.delete, outpath=None)
 
 if __name__ == "__main__":
     main()
