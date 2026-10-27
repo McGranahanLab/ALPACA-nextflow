@@ -94,3 +94,4 @@ python scripts/make_synthetic_test_data.py --out_dir test_data/synthetic_input
 - Ensure the ALPACA CLI plus pandas are importable inside the configured environment; `segment_worker.py` shells out via `python -m alpaca.__main__ run`.
 - When running on SLURM, adjust `slurm.conf` (memory/time per label) and confirm `$NXF_OPTS` contains the correct `-work-dir` and cache paths if needed.
 - Use `scripts/analyse_failed_run_helper.sh` to identify and troubleshoot failed workers. 
+- If you are using Gurobi Licence server, ensure that the server is running. It requires occasional restarts.

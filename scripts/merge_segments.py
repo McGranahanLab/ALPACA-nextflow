@@ -15,6 +15,16 @@ from tumour_classification import (
     SINGLE_SAMPLE,
     classify_cohort,
 )
+from utils import (
+    TABLE_EXTENSIONS,
+    common_table_type,
+    find_table,
+    is_table_file,
+    read_any_table,
+    strip_table_ext,
+    with_table_ext,
+    write_table,
+)
 
 # "Oct-13 09:44:50.018 [Task submitter] DEBUG nextflow.executor.GridTaskHandler - [SLURM] submitted
 #  process workerTask (167) > jobId: 60633732; workDir: /path/work/0b/cdc631dacf..."
@@ -56,7 +66,11 @@ ERROR_SIGNATURES: List[Tuple[str, "re.Pattern[str]"]] = [
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--segments-dir", required=True)
-    parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--out",
+        required=True,
+        help="Output path; the extension is set to match the segment outputs' format",
+    )
     parser.add_argument("--input-dir", required=True)
     parser.add_argument("--output-dir", default="")
     parser.add_argument("--nextflow-log", dest="nextflow_log", default="")
@@ -95,23 +109,37 @@ def parse_args():
     return parser.parse_args()
 
 
-def write_combined_tables(final: pd.DataFrame, args) -> None:
+def write_fresh_table(df: pd.DataFrame, path: str, file_type: str) -> str:
+    """Write df as <path stem>.<file_type>, removing copies left in other formats by a previous run
+    so downstream steps find a single file."""
+    out_path = with_table_ext(path, file_type)
+    for other_type in TABLE_EXTENSIONS.values():
+        stale = with_table_ext(path, other_type)
+        if stale != out_path and os.path.exists(stale):
+            os.remove(stale)
+    write_table(df, out_path)
+    return out_path
+
+
+def write_combined_tables(final: pd.DataFrame, args, file_type: str) -> None:
     """Write the cohort table without excluded single clone / single sample tumours.
 
     The unfiltered table and the tumour classification go to the outputs dir, where
     the analysis step uses them to produce per-tumour results for every tumour.
+    Both cohort tables are written in file_type (the segment outputs' format).
     """
     include = {c: bool(getattr(args, f"include_{c}")) for c in (SINGLE_CLONE, SINGLE_SAMPLE, SINGLE_CLONE_AND_SINGLE_SAMPLE)}
     tumour_ids = final["tumour_id"].astype(str).unique()
     classification = classify_cohort(args.input_dir, tumour_ids, include)
     side_dir = args.outputs_dir or os.path.dirname(os.path.abspath(args.out))
     classification.to_csv(os.path.join(side_dir, "tumour_classification.csv"), index=False)
-    final.to_csv(os.path.join(side_dir, "all_tumours_unfiltered.csv"), index=False)
+    write_fresh_table(final, os.path.join(side_dir, "all_tumours_unfiltered"), file_type)
     included = set(classification.loc[classification["included"], "tumour_id"])
     excluded = classification.loc[~classification["included"], "tumour_id"].tolist()
     if excluded:
-        print(f"Excluding {len(excluded)} single clone / single sample tumour(s) from {args.out}: {excluded}")
-    final[final["tumour_id"].astype(str).isin(included)].to_csv(args.out, index=False)
+        print(f"Excluding {len(excluded)} single clone / single sample tumour(s) from the combined table: {excluded}")
+    out_path = write_fresh_table(final[final["tumour_id"].astype(str).isin(included)], args.out, file_type)
+    print(f"Wrote merged segments to {out_path}")
 
 
 # --------------------------------------------------------------------------- #
@@ -353,12 +381,19 @@ def build_worker_summary(
 # Segment-level diagnosis (works without the Nextflow log: only needs the
 # ALPACA work directories, which are always bound into the container)
 # --------------------------------------------------------------------------- #
-def segment_filename(segment_id: str) -> str:
-    return f"{SEGMENT_FILE_PREFIX}{segment_id}.csv"
+def segment_stem(segment_id: str) -> str:
+    """Segment input file name without its table extension (segments may be csv or parquet)."""
+    return f"{SEGMENT_FILE_PREFIX}{segment_id}"
+
+
+def segment_file_exists(directory: str, segment_id: str) -> bool:
+    # lexists: pool entries are symlinks that may dangle once the segment moved on
+    stem = segment_stem(segment_id)
+    return any(os.path.lexists(os.path.join(directory, f"{stem}{ext}")) for ext in TABLE_EXTENSIONS)
 
 
 def index_worker_dirs(in_progress_dir: str) -> Dict[str, Tuple[str, str]]:
-    """basename -> (worker_dir_name, 'queue'|'active') for every file left in worker dirs."""
+    """basename without table extension -> (worker_dir_name, 'queue'|'active') for every file left in worker dirs."""
     index: Dict[str, Tuple[str, str]] = {}
     if not in_progress_dir or not os.path.isdir(in_progress_dir):
         return index
@@ -367,8 +402,8 @@ def index_worker_dirs(in_progress_dir: str) -> Dict[str, Tuple[str, str]]:
             sub_dir = os.path.join(in_progress_dir, worker, sub)
             try:
                 for name in os.listdir(sub_dir):
-                    if name.endswith(".csv"):
-                        index[name] = (worker, kind)
+                    if is_table_file(name):
+                        index[strip_table_ext(name)] = (worker, kind)
             except OSError:
                 continue
     return index
@@ -419,16 +454,16 @@ def diagnose_segments(
     states: Dict[str, List[str]] = defaultdict(list)
     detail: Dict[str, str] = {}
     for seg in missing_segments:
-        fn = segment_filename(seg)
-        if fn in in_progress_index:
-            worker, kind = in_progress_index[fn]
+        stem = segment_stem(seg)
+        if stem in in_progress_index:
+            worker, kind = in_progress_index[stem]
             state = "stranded_in_queue" if kind == "queue" else "claimed_not_finished"
             detail[seg] = worker
-        elif args.failed_dir and os.path.exists(os.path.join(args.failed_dir, fn)):
+        elif args.failed_dir and segment_file_exists(args.failed_dir, seg):
             state = "failed"
-        elif args.done_dir and os.path.exists(os.path.join(args.done_dir, fn)):
+        elif args.done_dir and segment_file_exists(args.done_dir, seg):
             state = "done_but_no_output"
-        elif args.pool_dir and os.path.lexists(os.path.join(args.pool_dir, fn)):
+        elif args.pool_dir and segment_file_exists(args.pool_dir, seg):
             state = "never_dispatched"
         else:
             state = "untracked"
@@ -445,7 +480,7 @@ def diagnose_segments(
                 continue
             alpaca_failed_runs += 1
             for fn in run.get("input_files", []):
-                failed_runs[fn] = {
+                failed_runs[strip_table_ext(fn)] = {
                     "worker": wid,
                     "returncode": run.get("returncode"),
                     "stderr": run.get("stderr_snip", ""),
@@ -571,7 +606,7 @@ def build_findings(context: Dict[str, object]) -> List[Dict[str, object]]:
         label_counter: Counter = Counter()
         samples: Dict[str, str] = {}
         for seg in failed:
-            run = failed_runs.get(segment_filename(seg))
+            run = failed_runs.get(segment_stem(seg))
             text = run["stderr"] if run else ""
             labels = classify_text(text) or ["unclassified"]
             for label in labels:
@@ -606,7 +641,7 @@ def build_findings(context: Dict[str, object]) -> List[Dict[str, object]]:
             actions.append(
                 "Python exception / unknown error: reproduce one segment by hand, e.g. "
                 f"alpaca run --mode segment --input_tumour_directory <input_dir>/<tumour> "
-                f"--input_data_directory <dir with the segment csv> --input_files {segment_filename(failed[0])} "
+                f"--input_data_directory <dir with the segment table> --input_files {segment_stem(failed[0])}.<csv|parquet> "
                 "--output_directory /tmp/test " + (context.get("alpaca_args") or "")
             )
         actions.append(
@@ -629,7 +664,7 @@ def build_findings(context: Dict[str, object]) -> List[Dict[str, object]]:
                 "actions": [
                     "Inspect alpaca-work/outputs/segment_outputs/ and ALPACA logs for these segments.",
                     "RESTART=1 skips anything in done/, so remove them first: "
-                    "while read s; do rm -f alpaca-work/done/ALPACA_input_table_${s}.csv; done "
+                    "while read s; do rm -f alpaca-work/done/ALPACA_input_table_${s}.*; done "
                     "< <path to missing_segments.tsv, state=done_but_no_output>",
                     "Then resubmit with sbatch slurm_submit.sbatch.",
                 ],
@@ -846,13 +881,15 @@ def generate_failure_report(
 def main():
     args = parse_args()
     seg_dfs: List[pd.DataFrame] = []
+    seg_types = set()
     for file_name in os.listdir(args.segments_dir):
-        if not file_name.endswith(".csv"):
+        if not is_table_file(file_name):
             continue
         if any(token in file_name for token in ("combined", "report", "summary")):
             continue
-        df = pd.read_csv(os.path.join(args.segments_dir, file_name))
+        df, file_type = read_any_table(os.path.join(args.segments_dir, file_name))
         seg_dfs.append(df)
+        seg_types.add(file_type)
 
     final = pd.concat(seg_dfs, ignore_index=True)
 
@@ -874,13 +911,13 @@ def main():
     for tumour_id in [x for x in os.listdir(args.input_dir) if x != ".DS_Store"]:
         if tumours_filter and tumour_id not in tumours_filter:
             continue
-        alpca_input_table_path = os.path.join(
-            args.input_dir, tumour_id, "ALPACA_input_table.csv"
+        alpca_input_table_path = find_table(
+            os.path.join(args.input_dir, tumour_id), "ALPACA_input_table"
         )
-        if os.path.exists(alpca_input_table_path) is False:
+        if alpca_input_table_path is None:
             continue
         try:
-            tumour_df = pd.read_csv(alpca_input_table_path)
+            tumour_df, _ = read_any_table(alpca_input_table_path)
             input_dfs.append(tumour_df)
         except Exception as exc:
             print(f"Error reading {tumour_id}: {exc}")
@@ -891,7 +928,7 @@ def main():
     missing_segments = sorted(segments_in - segments_out)
 
     if not missing_segments:
-        write_combined_tables(final, args)
+        write_combined_tables(final, args, common_table_type(seg_types))
         with open("merged_segments.txt", "w", encoding="utf-8") as handle:
             for seg in sorted(segments_in):
                 handle.write(f"{seg}\n")
