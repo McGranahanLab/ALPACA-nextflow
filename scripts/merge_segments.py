@@ -47,13 +47,6 @@ ERROR_SIGNATURES: List[Tuple[str, "re.Pattern[str]"]] = [
         "time_limit",
         re.compile(r"DUE TO TIME LIMIT|TIME LIMIT|TIMEOUT", re.IGNORECASE),
     ),
-    (
-        "gurobi_license",
-        re.compile(
-            r"license|licence|GRB_ERROR|Error code 1000[0-9]|Restricted license|size-limited",
-            re.IGNORECASE,
-        ),
-    ),
     ("infeasible", re.compile(r"infeasible", re.IGNORECASE)),
     ("python_exception", re.compile(r"Traceback \(most recent call last\)")),
     (
@@ -626,11 +619,6 @@ def build_findings(context: Dict[str, object]) -> List[Dict[str, object]]:
             actions.append(
                 "OOM signature found: raise 'memory' of withLabel 'worker_high' in nextflow/slurm.conf "
                 f"(currently {context.get('worker_memory') or 'unknown'}), e.g. to 16 GB."
-            )
-        if "gurobi_license" in label_counter:
-            actions.append(
-                "Gurobi licence problem: check GUROBI_LICENSE_FILE in pipeline.env exists on compute nodes "
-                "and is bound into the container; a size-limited licence cannot solve large segments."
             )
         if "infeasible" in label_counter:
             actions.append(
