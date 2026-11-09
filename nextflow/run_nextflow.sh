@@ -104,6 +104,9 @@ NXF_ARGS+=( -with-report "${NFX_REPORTS}/report_${timestamp}.html" )
 NXF_ARGS+=( --max_idle_seconds "${MAX_IDLE_SECONDS:-600}" )
 NXF_ARGS+=( --delete_reports "${DELETE_REPORTS:-0}" )
 NXF_ARGS+=( --restart "${RESTART:-0}" )
+NXF_ARGS+=( --include_single_clone "${INCLUDE_SINGLE_CLONE:-0}" )
+NXF_ARGS+=( --include_single_sample "${INCLUDE_SINGLE_SAMPLE:-0}" )
+NXF_ARGS+=( --include_single_clone_and_single_sample "${INCLUDE_SINGLE_CLONE_AND_SINGLE_SAMPLE:-0}" )
 
 if [[ -n "${RESTRICT_TO_TUMOURS:-}" ]]; then
 	NXF_ARGS+=( --restrict_to_tumours "${RESTRICT_TO_TUMOURS}" )
