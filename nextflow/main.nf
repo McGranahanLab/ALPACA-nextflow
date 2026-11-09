@@ -409,9 +409,10 @@ process analysis {
             --genome_cache_dir ${params.genome_cache_dir}
 
         # calculate WGD ratios:
-        alpaca get-scores \
-            --input_tumour_directory "\${input_tumour_directory}" \
-            --output_directory "\${tumour_dir}" 
+        alpaca wgd \
+            --alpaca_output_path "\${tumour_dir}/ALPACA_output_\${tumour_id}.csv" \
+            --tree_path "\${input_tumour_directory}/tree_paths.json" \
+            --output_directory "\${tumour_dir}"
 
     done
     
